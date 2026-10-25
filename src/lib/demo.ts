@@ -58,5 +58,5 @@ export function createDemo(): AppData {
       side: 'A',
       at: now - 18 * 60000 + i * 1000,
     })
-  return { version: 1, players, sessions: [session], matches: [match] }
+  return { version: 2, players, sessions: [session], matches: [match] }
 }

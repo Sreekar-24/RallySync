@@ -10,32 +10,53 @@ import {
   Flag,
   Play,
   Plus,
-  RotateCcw,
   Settings2,
   Sparkles,
   Trophy,
   Users,
-  X,
 } from 'lucide-react'
 import { Avatar, CourtArt, Modal, Shuttle } from '../components'
 import { useRally } from '../store'
-import { scoreMatch, suggestMatch, attendanceSummary, buildFinalResult } from '../domain/engine'
-import { type AppData, type Match, type Session, type Side } from '../domain/model'
-import { createDemo } from '../lib/demo'
+import { scoreMatch, suggestMatch, attendanceSummary } from '../domain/engine'
+import { type Match, type Session, type PlannedMatch } from '../domain/model'
+import ScoreDialog from './scoring/ScoreDialog'
+import SessionSchedule from './schedule/SessionSchedule'
+import PlanningFields, { defaultPlanningSettings } from './schedule/PlanningFields'
+import { generatePlan, editPlanSlot } from '../domain/planner'
+import SessionActions from './SessionActions'
+import ReportActions from './ReportActions'
+import AvailabilityWindow from './AvailabilityWindow'
 import { downloadBackup } from '../lib/storage'
+
+function currentlyAvailable(session: Session, id: string, now = Date.now()) {
+  const window = session.availability?.[id]
+  return (
+    session.availablePlayerIds.includes(id) &&
+    (window?.from ?? 0) <= now &&
+    (window?.until ?? Infinity) > now
+  )
+}
+function availabilityLabel(session: Session, id: string, now = Date.now()) {
+  const window = session.availability?.[id]
+  if (window?.from && window.from > now)
+    return `Arrives ${new Date(window.from).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}`
+  if (window?.until && window.until <= now) return 'Finished for today'
+  return 'Taking a break'
+}
 
 export default function PlayPage({
   onNavigate,
 }: {
   onNavigate: (page: 'players' | 'rules' | 'history' | 'rankings') => void
 }) {
-  const { data, commit, notify, readOnly } = useRally()
+  const { data, commit, notify, readOnly, startDemo, isDemo } = useRally()
   const session = data.sessions.find((s) => s.status === 'active')
   const [setup, setSetup] = useState(false)
   const [attendance, setAttendance] = useState(false)
   const [scoring, setScoring] = useState<string | null>(null)
   const [lineup, setLineup] = useState<number | null>(null)
   const [ending, setEnding] = useState(false)
+  const [view, setView] = useState<'courts' | 'schedule'>('courts')
   const [now, setNow] = useState(Date.now())
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 15000)
@@ -49,49 +70,97 @@ export default function PlayPage({
   )
   const selectedMatch = data.matches.find((m) => m.id === scoring)
   const playerName = (id: string) => data.players.find((p) => p.id === id)?.name ?? 'Unknown player'
-  const start = (court: number, teams?: { teamA: string[]; teamB: string[] }) => {
+  const nextSlot = (s: Session, court: number) =>
+    s.plan?.slots.find((slot) => slot.court === court && !slot.matchId)
+  const start = (court: number, teams?: { teamA: string[]; teamB: string[] }, slotId?: string) => {
     if (!session) return
     let newId: string | null = null
-    commit((current) => {
-      const liveSession = current.sessions.find((s) => s.id === session.id)
-      if (!liveSession) return current
-      const suggested = teams ?? suggestMatch(current, liveSession, court)
-      if (!suggested) return current
-      const ids = [...suggested.teamA, ...suggested.teamB]
-      const size = session.format === 'singles' ? 1 : 2
-      const busy = new Set(
-        current.matches
-          .filter((m) => m.status === 'playing')
-          .flatMap((m) => [...m.teamA, ...m.teamB]),
-      )
-      if (
-        liveSession.status !== 'active' ||
-        suggested.teamA.length !== size ||
-        suggested.teamB.length !== size ||
-        new Set(ids).size !== size * 2 ||
-        ids.some((id) => busy.has(id) || !liveSession.availablePlayerIds.includes(id)) ||
-        current.matches.some(
-          (m) => m.sessionId === session.id && m.court === court && m.status === 'playing',
+    try {
+      commit((current) => {
+        let liveSession = current.sessions.find((s) => s.id === session.id)
+        if (!liveSession || liveSession.status !== 'active') return current
+        let slot = slotId
+          ? liveSession.plan?.slots.find((s) => s.id === slotId)
+          : nextSlot(liveSession, court)
+        if (slotId && (!slot || slot.matchId)) return current
+        if (
+          slot &&
+          teams &&
+          (JSON.stringify(slot.teamA) !== JSON.stringify(teams.teamA) ||
+            JSON.stringify(slot.teamB) !== JSON.stringify(teams.teamB))
+        ) {
+          liveSession = editPlanSlot(current, liveSession, slot.id, teams.teamA, teams.teamB)
+          slot = liveSession.plan?.slots.find((s) => s.id === slot!.id)
+        }
+        const suggested =
+          teams ?? slot ?? (!liveSession.plan ? suggestMatch(current, liveSession, court) : null)
+        if (!suggested) return current
+        const ids = [...suggested.teamA, ...suggested.teamB]
+        const size = liveSession.format === 'singles' ? 1 : 2
+        const busy = new Set(
+          current.matches
+            .filter((m) => m.status === 'playing')
+            .flatMap((m) => [...m.teamA, ...m.teamB]),
         )
-      )
-        return current
-      newId = crypto.randomUUID()
-      const match: Match = {
-        id: newId,
-        sessionId: session.id,
-        court,
-        ...suggested,
-        startedAt: Date.now(),
-        status: 'playing',
-        actions: [],
-        revision: 0,
-      }
-      return { ...current, matches: [...current.matches, match] }
-    })
-    if (newId) {
-      setScoring(newId)
-      notify(`Court ${court} is ready. Let’s play!`)
-    } else notify('The lineup changed. Please check availability and try again.')
+        const now = Date.now()
+        if (
+          suggested.teamA.length !== size ||
+          suggested.teamB.length !== size ||
+          new Set(ids).size !== size * 2 ||
+          ids.some(
+            (id) =>
+              busy.has(id) ||
+              !liveSession!.availablePlayerIds.includes(id) ||
+              (liveSession!.availability?.[id]?.from ?? 0) > now ||
+              (liveSession!.availability?.[id]?.until ?? Infinity) <= now,
+          ) ||
+          current.matches.some(
+            (m) => m.sessionId === session.id && m.court === court && m.status === 'playing',
+          )
+        )
+          return current
+        newId = crypto.randomUUID()
+        const match: Match = {
+          id: newId,
+          sessionId: session.id,
+          court,
+          teamA: suggested.teamA,
+          teamB: suggested.teamB,
+          startedAt: now,
+          status: 'playing',
+          actions: [],
+          revision: 0,
+          ...(slot ? { planSlotId: slot.id } : {}),
+        }
+        const plannedSession =
+          slot && liveSession.plan
+            ? {
+                ...liveSession,
+                plan: {
+                  ...liveSession.plan,
+                  revision: liveSession.plan.revision + 1,
+                  slots: liveSession.plan.slots.map((s) =>
+                    s.id === slot!.id ? { ...s, matchId: match.id, startsAt: now } : s,
+                  ),
+                },
+              }
+            : liveSession
+        return {
+          ...current,
+          sessions: current.sessions.map((s) => (s.id === session.id ? plannedSession : s)),
+          matches: [...current.matches, match],
+        }
+      })
+      if (newId) {
+        setScoring(newId)
+        notify(`Court ${court} is ready. Let’s play!`)
+      } else
+        notify(
+          'This lineup is not available now. Check breaks, court occupancy, and availability windows.',
+        )
+    } catch (error) {
+      notify(error instanceof Error ? error.message : 'This lineup needs review.')
+    }
   }
   const endSession = () => {
     if (!session || activeMatches.length) return
@@ -105,15 +174,19 @@ export default function PlayPage({
     notify('Session complete. Your results are saved on this device.')
   }
   const loadDemo = () => {
-    if (data.players.length || data.sessions.length) return
-    commit(() => createDemo())
-    notify('Demo loaded. These are sample players—you can reset them in Settings.')
+    startDemo()
+    setView('courts')
   }
   const suggestions = new Map<number, ReturnType<typeof suggestMatch>>()
   let planningData = data
   if (session)
     for (let court = 1; court <= session.courtCount; court++) {
-      const suggestion = suggestMatch(planningData, session, court, now)
+      const planned = nextSlot(session, court)
+      const suggestion = session.plan
+        ? planned
+          ? { teamA: planned.teamA, teamB: planned.teamB, reason: planned.reason }
+          : null
+        : suggestMatch(planningData, session, court, now)
       suggestions.set(court, suggestion)
       if (suggestion)
         planningData = {
@@ -248,6 +321,45 @@ export default function PlayPage({
         </section>
       )}
 
+      {session && (
+        <div className="play-session-tools">
+          <div className="play-view-tabs" role="group" aria-label="Session view">
+            <button
+              className={view === 'courts' ? 'active' : ''}
+              aria-pressed={view === 'courts'}
+              onClick={() => setView('courts')}
+            >
+              <Play size={16} /> Courts
+            </button>
+            <button
+              className={view === 'schedule' ? 'active' : ''}
+              aria-pressed={view === 'schedule'}
+              onClick={() => setView('schedule')}
+            >
+              <Clock3 size={16} /> Full schedule{' '}
+              {session.plan ? `(${session.plan.slots.length})` : ''}
+            </button>
+          </div>
+          <SessionActions
+            session={session}
+            onDeleted={() => {
+              setScoring(null)
+              setEnding(false)
+              setAttendance(false)
+            }}
+          />
+        </div>
+      )}
+      {session && view === 'schedule' && (
+        <SessionSchedule
+          session={session}
+          onStart={(slotId) => {
+            const slot = session.plan?.slots.find((s) => s.id === slotId)
+            if (slot) start(slot.court, undefined, slotId)
+          }}
+          onScore={(id) => setScoring(id)}
+        />
+      )}
       <div className="stat-grid">
         <Stat
           icon={<Users size={19} />}
@@ -255,7 +367,7 @@ export default function PlayPage({
           label={session ? 'Players in session' : 'Your players'}
           detail={
             session
-              ? `${session.availablePlayerIds.length} available to play`
+              ? `${session.availablePlayerIds.filter((id) => currentlyAvailable(session, id, now)).length} available to play`
               : 'Build your regular crew'
           }
           color="green"
@@ -273,7 +385,9 @@ export default function PlayPage({
           icon={<Clock3 size={19} />}
           value={
             session
-              ? session.availablePlayerIds.filter((id) => !liveIds.has(id)).length
+              ? session.availablePlayerIds.filter(
+                  (id) => !liveIds.has(id) && currentlyAvailable(session, id, now),
+                ).length
               : data.sessions.filter((s) => s.status === 'completed').length
           }
           label={session ? 'Ready for a turn' : 'Sessions played'}
@@ -282,7 +396,7 @@ export default function PlayPage({
         />
       </div>
 
-      <div className="dashboard-columns">
+      <div className="dashboard-columns" hidden={Boolean(session && view === 'schedule')}>
         <section className="panel courts-panel">
           <div className="section-heading">
             <div>
@@ -366,7 +480,13 @@ export default function PlayPage({
                         <div className="court-actions">
                           <button
                             className={`button ${match ? 'primary' : 'soft'}`}
-                            disabled={!match && readOnly}
+                            disabled={
+                              !match &&
+                              (readOnly ||
+                                [...teamA, ...teamB].some(
+                                  (id) => liveIds.has(id) || !currentlyAvailable(session, id, now),
+                                ))
+                            }
                             onClick={() =>
                               match ? setScoring(match.id) : start(court, suggestion ?? undefined)
                             }
@@ -459,7 +579,7 @@ export default function PlayPage({
                 {session.playerIds
                   .filter((id) => !liveIds.has(id))
                   .map((id) => {
-                    const available = session.availablePlayerIds.includes(id)
+                    const available = currentlyAvailable(session, id, now)
                     const last = Math.max(
                       attendanceSummary(session, id, now).waitingSince,
                       ...data.matches
@@ -483,7 +603,7 @@ export default function PlayPage({
                           <span>
                             {available
                               ? `${Math.max(0, Math.floor((now - last) / 60000))} min waiting`
-                              : 'Taking a break'}
+                              : availabilityLabel(session, id, now)}
                           </span>
                         </div>
                         <span className={`availability-dot ${available ? '' : 'resting'}`} />
@@ -589,7 +709,8 @@ export default function PlayPage({
           onClose={() => setSetup(false)}
           onCreated={() => {
             setSetup(false)
-            notify('Session ready. Your first lineup is waiting.')
+            setView('schedule')
+            notify('Session ready. Your complete schedule is waiting.')
           }}
         />
       )}
@@ -611,6 +732,7 @@ export default function PlayPage({
         <LineupDialog
           session={session}
           court={lineup}
+          slot={nextSlot(session, lineup)}
           onClose={() => setLineup(null)}
           onStart={(teams) => {
             start(lineup, teams)
@@ -638,7 +760,12 @@ export default function PlayPage({
                 </strong>
                 <p>A good time, well played.</p>
               </div>
-              <button className="button soft full-width" onClick={() => downloadBackup(data)}>
+              <ReportActions data={data} sessionId={session.id} scopeLabel={session.name} />
+              <button
+                className="button soft full-width"
+                onClick={() => !isDemo && downloadBackup(data)}
+                disabled={isDemo}
+              >
                 <ArrowDownToLine size={17} /> Download a backup
               </button>
             </>
@@ -697,6 +824,8 @@ function SessionSetup({ onClose, onCreated }: { onClose: () => void; onCreated: 
   const [bestOf, setBestOf] = useState<1 | 3>(1)
   const [mode, setMode] = useState<'balanced' | 'fair' | 'variety'>('balanced')
   const [advanced, setAdvanced] = useState(false)
+  const [planning, setPlanning] = useState(defaultPlanningSettings)
+  const [scoringMode, setScoringMode] = useState<'team' | 'individual' | 'combined'>('combined')
   const addGuest = () => {
     const value = guest.trim()
     if (!value) return
@@ -729,16 +858,19 @@ function SessionSetup({ onClose, onCreated }: { onClose: () => void; onCreated: 
       cap: target === 21 ? 30 : target + 9,
       bestOf,
       mode,
+      planning,
+      scoringMode,
       playerIds: selected,
       availablePlayerIds: selected,
       status: 'active',
       attendance: selected.map((playerId) => ({ playerId, at: now, available: true })),
     }
-    commit((current) =>
-      current.sessions.some((s) => s.status === 'active')
-        ? current
-        : { ...current, sessions: [...current.sessions, session] },
-    )
+    commit((current) => {
+      if (current.sessions.some((s) => s.status === 'active')) return current
+      const combined = { ...current, sessions: [...current.sessions, session] }
+      const planned = { ...session, plan: generatePlan(combined, session) }
+      return { ...combined, sessions: [...current.sessions, planned] }
+    })
     onCreated()
   }
   return (
@@ -867,6 +999,32 @@ function SessionSetup({ onClose, onCreated }: { onClose: () => void; onCreated: 
             ))}
           </div>
         </div>
+        <PlanningFields value={planning} onChange={setPlanning} mode={mode} courtCount={courts} />
+        <div className="field">
+          <span>How would you like to score?</span>
+          <div className="scoring-mode-options" role="group" aria-label="Scoring mode">
+            {(
+              [
+                { id: 'team', label: 'Team points' },
+                { id: 'individual', label: 'Player points' },
+                { id: 'combined', label: 'Team + player points' },
+              ] as const
+            ).map((option) => (
+              <button
+                key={option.id}
+                type="button"
+                className={scoringMode === option.id ? 'selected' : ''}
+                aria-pressed={scoringMode === option.id}
+                onClick={() => setScoringMode(option.id)}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+          <small className="field-help">
+            Player points tally into their side’s score. Unassigned points stay visible.
+          </small>
+        </div>
         <button
           className="text-button"
           type="button"
@@ -880,7 +1038,11 @@ function SessionSetup({ onClose, onCreated }: { onClose: () => void; onCreated: 
           <div className="form-grid">
             <label className="field">
               Points per game
-              <select value={target} onChange={(e) => setTarget(Number(e.target.value))}>
+              <select
+                aria-label="Points per game"
+                value={target}
+                onChange={(e) => setTarget(Number(e.target.value))}
+              >
                 {[11, 15, 21].map((n) => (
                   <option key={n} value={n}>
                     {n} points{n !== 21 ? ' · house format' : ' · standard'}
@@ -893,7 +1055,19 @@ function SessionSetup({ onClose, onCreated }: { onClose: () => void; onCreated: 
             </label>
             <label className="field">
               Match length
-              <select value={bestOf} onChange={(e) => setBestOf(Number(e.target.value) as 1 | 3)}>
+              <select
+                aria-label="Match length"
+                value={bestOf}
+                onChange={(e) => {
+                  const next = Number(e.target.value) as 1 | 3
+                  setPlanning((current) =>
+                    current.matchMinutes === (bestOf === 3 ? 30 : 12)
+                      ? { ...current, matchMinutes: next === 3 ? 30 : 12 }
+                      : current,
+                  )
+                  setBestOf(next)
+                }}
+              >
                 <option value={1}>One game · social</option>
                 <option value={3}>Best of 3 games</option>
               </select>
@@ -1008,7 +1182,9 @@ function AttendanceDialog({ session, onClose }: { session: Session; onClose: () 
                     : !joined
                       ? 'Not in this session'
                       : available
-                        ? 'Ready for the next rally'
+                        ? currentlyAvailable(session, p.id)
+                          ? 'Ready for the next rally'
+                          : availabilityLabel(session, p.id)
                         : 'Taking a break / away'}
                 </small>
               </div>
@@ -1027,6 +1203,7 @@ function AttendanceDialog({ session, onClose }: { session: Session; onClose: () 
                   'Join'
                 )}
               </button>
+              <AvailabilityWindow session={session} playerId={p.id} name={p.name} />
             </div>
           )
         })}
@@ -1049,16 +1226,18 @@ function AttendanceDialog({ session, onClose }: { session: Session; onClose: () 
 function LineupDialog({
   session,
   court,
+  slot,
   onClose,
   onStart,
 }: {
   session: Session
   court: number
+  slot?: PlannedMatch
   onClose: () => void
   onStart: (teams: { teamA: string[]; teamB: string[] }) => void
 }) {
   const { data } = useRally()
-  const suggestion = suggestMatch(data, session, court)
+  const suggestion = slot ?? suggestMatch(data, session, court)
   const [teamA, setA] = useState(suggestion?.teamA ?? [])
   const [teamB, setB] = useState(suggestion?.teamB ?? [])
   const count = session.format === 'doubles' ? 2 : 1
@@ -1066,7 +1245,11 @@ function LineupDialog({
     data.matches.filter((m) => m.status === 'playing').flatMap((m) => [...m.teamA, ...m.teamB]),
   )
   const eligible = data.players.filter(
-    (p) => session.availablePlayerIds.includes(p.id) && !busy.has(p.id),
+    (p) =>
+      session.availablePlayerIds.includes(p.id) &&
+      !busy.has(p.id) &&
+      (session.availability?.[p.id]?.from ?? 0) <= Date.now() &&
+      (session.availability?.[p.id]?.until ?? Infinity) > Date.now(),
   )
   const chosen = [...teamA, ...teamB]
   const valid =
@@ -1136,308 +1319,4 @@ function LineupDialog({
   )
 }
 
-function ScoreDialog({
-  match,
-  session,
-  onClose,
-  onRules,
-}: {
-  match: Match
-  session: Session
-  onClose: () => void
-  onRules: () => void
-}) {
-  const { data, commit, notify, readOnly } = useRally()
-  const score = scoreMatch(match, session)
-  const [stopping, setStopping] = useState(false)
-  const [resultEntry, setResultEntry] = useState(false)
-  const names = (ids: string[]) =>
-    ids.map((id) => data.players.find((p) => p.id === id)?.name ?? 'Player')
-  const addPoint = (side?: Side) => {
-    commit((current) => ({
-      ...current,
-      matches: current.matches.map((m) => {
-        if (m.id !== match.id || m.status !== 'playing') return m
-        const liveScore = scoreMatch(m, session)
-        if (side && liveScore.complete) return m
-        return {
-          ...m,
-          revision: m.revision + 1,
-          actions: [
-            ...m.actions,
-            {
-              id: crypto.randomUUID(),
-              kind: side ? ('point' as const) : ('undo' as const),
-              side,
-              at: Date.now(),
-            },
-          ],
-        }
-      }),
-    }))
-  }
-  const finish = () => {
-    commit((current) => ({
-      ...current,
-      matches: current.matches.map((m) =>
-        m.id === match.id && scoreMatch(m, session).complete
-          ? { ...m, status: 'completed', endedAt: Date.now(), revision: m.revision + 1 }
-          : m,
-      ),
-    }))
-    notify('Match saved. The next lineup is ready.')
-    onClose()
-  }
-  const abandon = () => {
-    commit((current) => ({
-      ...current,
-      matches: current.matches.map((m) =>
-        m.id === match.id
-          ? { ...m, status: 'abandoned', endedAt: Date.now(), revision: m.revision + 1 }
-          : m,
-      ),
-    }))
-    notify('Match stopped. Partial scores are kept, but don’t affect rankings.')
-    onClose()
-  }
-  return (
-    <Modal
-      title={`Court ${match.court} · Scoreboard`}
-      subtitle={`${session.bestOf === 1 ? 'One game' : 'Best of 3'} · First to ${session.target}, win by ${session.winBy}, cap ${session.cap}`}
-      onClose={onClose}
-      wide
-    >
-      <div className="scoreboard-meta">
-        <span className={`tag ${score.complete ? '' : 'tag-live'}`}>
-          {score.complete ? 'Match complete' : `Game ${score.games.length + 1}`}
-        </span>
-        <button className="text-button" onClick={onRules}>
-          <CircleHelp size={15} /> Quick rules
-        </button>
-      </div>
-      <div className="scoreboard">
-        {(['A', 'B'] as const).map((side) => (
-          <div
-            className={`score-side score-side-${side.toLowerCase()} ${score.complete && score.winner === side ? 'score-winner' : ''}`}
-            key={side}
-          >
-            <div className="score-side-avatars">
-              {names(side === 'A' ? match.teamA : match.teamB).map((name, i) => (
-                <Avatar name={name} index={side === 'A' ? i : i + 2} key={name} />
-              ))}
-            </div>
-            <span className="score-side-label">
-              SIDE {side}
-              {score.complete && score.winner === side ? ' · WINNER' : ''}
-            </span>
-            <strong className="score-names">
-              {names(side === 'A' ? match.teamA : match.teamB).join(' & ')}
-            </strong>
-            <span
-              className="score-number"
-              aria-label={`Side ${side} score ${side === 'A' ? score.a : score.b}`}
-              aria-live="polite"
-            >
-              {side === 'A' ? score.a : score.b}
-            </span>
-            <button
-              className="button score-add"
-              aria-label={`Point to side ${side}`}
-              disabled={readOnly || score.complete}
-              onClick={() => addPoint(side)}
-            >
-              <Plus size={21} /> Point
-            </button>
-          </div>
-        ))}
-      </div>
-      {session.bestOf === 3 && (
-        <div className="game-summary">
-          <span>Games</span>
-          <strong>
-            {score.gamesA} – {score.gamesB}
-          </strong>
-          {score.games.map((g, i) => (
-            <span className="tag" key={i}>
-              G{i + 1}: {g.a}–{g.b}
-            </span>
-          ))}
-        </div>
-      )}
-      {score.complete ? (
-        <div className="match-complete">
-          <Trophy size={22} />
-          <div>
-            <strong>
-              Well played, {names(score.winner === 'A' ? match.teamA : match.teamB).join(' & ')}!
-            </strong>
-            <span>Confirm to update results and free the court.</span>
-          </div>
-          <button className="button primary" disabled={readOnly} onClick={finish}>
-            Save result <Check size={17} />
-          </button>
-        </div>
-      ) : (
-        <p className="score-help">
-          Tap the side that won the rally. Every point saves on this device.
-        </p>
-      )}
-      <div className="score-tools">
-        <button
-          className="button ghost"
-          disabled={readOnly || !(score.a || score.b || score.games.length)}
-          onClick={() => addPoint()}
-        >
-          <RotateCcw size={16} /> Undo last point
-        </button>
-        <button
-          className="button ghost"
-          disabled={readOnly}
-          onClick={() => setResultEntry(!resultEntry)}
-        >
-          Enter final score
-        </button>
-        <button
-          className="button danger-ghost"
-          disabled={readOnly}
-          onClick={() => setStopping(!stopping)}
-        >
-          Stop match
-        </button>
-      </div>
-      {resultEntry && (
-        <FinalScoreEntry
-          session={session}
-          match={match}
-          onSaved={() => {
-            notify('Final result saved. The next lineup is ready.')
-            onClose()
-          }}
-        />
-      )}
-      {stopping && (
-        <div className="notice warning">
-          <div>
-            <strong>Stop without a result?</strong>
-            <p>The court will be released. Partial points stay in history, outside the rankings.</p>
-          </div>
-          <button className="button danger" onClick={abandon}>
-            Stop match
-          </button>
-          <button
-            className="icon-button"
-            aria-label="Keep match playing"
-            onClick={() => setStopping(false)}
-          >
-            <X size={17} />
-          </button>
-        </div>
-      )}
-    </Modal>
-  )
-}
-
-export function FinalScoreEntry({
-  session,
-  match,
-  onSaved,
-}: {
-  session: Session
-  match: Match
-  onSaved: () => void
-}) {
-  const { commit, readOnly } = useRally()
-  const [games, setGames] = useState<{ a: string; b: string }[]>(
-    Array.from({ length: session.bestOf }, () => ({ a: '', b: '' })),
-  )
-  const [error, setError] = useState('')
-  const submit = (e: FormEvent) => {
-    e.preventDefault()
-    setError('')
-    const lastEntered = games.findLastIndex((g) => g.a !== '' || g.b !== '')
-    if (lastEntered < 0) {
-      setError('Enter at least one complete game.')
-      return
-    }
-    const entered = games.slice(0, lastEntered + 1)
-    if (entered.some((g) => g.a === '' || g.b === '')) {
-      setError('Enter complete games in order, starting with game 1.')
-      return
-    }
-    try {
-      const changed = buildFinalResult(
-        match,
-        session,
-        entered.map((g) => ({ a: Number(g.a), b: Number(g.b) })),
-      )
-      commit((current: AppData) => ({
-        ...current,
-        matches: current.matches.map((m) => (m.id === match.id ? changed : m)),
-      }))
-      onSaved()
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : 'Check the final scores and try again.')
-    }
-  }
-  return (
-    <form className="final-score-entry" onSubmit={submit}>
-      <div>
-        <strong>
-          {match.status === 'completed'
-            ? 'Correct the result'
-            : 'Already played? Enter the result.'}
-        </strong>
-        <p>Team scores only. Previous scoring entries stay in the correction log.</p>
-      </div>
-      {games.map((g, i) => (
-        <div className="final-score-row" key={i}>
-          <span>Game {i + 1}</span>
-          <label>
-            Side A
-            <input
-              type="number"
-              inputMode="numeric"
-              min="0"
-              max={session.cap}
-              aria-label={`Game ${i + 1} side A`}
-              value={g.a}
-              onChange={(e) =>
-                setGames((current) =>
-                  current.map((x, j) => (i === j ? { ...x, a: e.target.value } : x)),
-                )
-              }
-            />
-          </label>
-          <span>:</span>
-          <label>
-            Side B
-            <input
-              type="number"
-              inputMode="numeric"
-              min="0"
-              max={session.cap}
-              aria-label={`Game ${i + 1} side B`}
-              value={g.b}
-              onChange={(e) =>
-                setGames((current) =>
-                  current.map((x, j) => (i === j ? { ...x, b: e.target.value } : x)),
-                )
-              }
-            />
-          </label>
-        </div>
-      ))}
-      {session.bestOf === 3 && (
-        <small className="field-help">Leave game 3 empty if the match ended 2–0.</small>
-      )}
-      {error && (
-        <p role="alert" className="field-error">
-          {error}
-        </p>
-      )}
-      <button className="button primary" type="submit" disabled={readOnly}>
-        Save final result <Check size={16} />
-      </button>
-    </form>
-  )
-}
+export { default as FinalScoreEntry } from './scoring/FinalScoreEntry'

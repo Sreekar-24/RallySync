@@ -4,6 +4,8 @@ import { useRally } from '../store'
 import { scoreMatch } from '../domain/engine'
 import type { Match, Session } from '../domain/model'
 import './collection.css'
+import SessionActions from './SessionActions'
+import ReportActions from './ReportActions'
 
 export default function HistoryPage({
   onCorrectMatch,
@@ -129,6 +131,10 @@ export default function HistoryPage({
                 </button>
                 {open && (
                   <div className="history-session-body" id={`session-${session.id}`}>
+                    <div className="history-session-actions">
+                      <ReportActions data={data} sessionId={session.id} scopeLabel={session.name} />
+                      <SessionActions session={session} onDeleted={() => setExpanded(null)} />
+                    </div>
                     <p className="history-session-rules">
                       {new Date(session.startedAt).toLocaleDateString(undefined, {
                         weekday: 'long',

@@ -18,6 +18,8 @@ import {
   type SyncConfig,
 } from './lib/storage'
 import { pullSheet, pushSheet, validateSheetEndpoint } from './lib/sheets'
+import { createDemo } from './lib/demo'
+import { generatePlan, replanSession } from './domain/planner'
 
 interface RallyContext {
   data: AppData
@@ -34,6 +36,9 @@ interface RallyContext {
   configureSync: (endpoint: string, role: 'organizer' | 'viewer') => void
   syncNow: () => Promise<void>
   resolveSync: (choice: 'pull' | 'push') => Promise<void>
+  isDemo: boolean
+  startDemo: () => void
+  exitDemo: () => void
 }
 const Context = createContext<RallyContext | null>(null)
 
@@ -51,12 +56,15 @@ export function RallyProvider({ children }: { children: ReactNode }) {
   const [toast, setToast] = useState<string | null>(null)
   const [syncBusy, setSyncBusy] = useState(false)
   const [syncError, setSyncError] = useState<string | null>(null)
+  const [demo, setDemo] = useState<AppData | null>(null)
+  const demoRef = useRef<AppData | null>(null)
   const ref = useRef(saved)
   const busy = useRef(false)
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const saveQueue = useRef(Promise.resolve())
   const readOnly =
-    locked || storageBlocked || Boolean(saved.sync.endpoint && saved.sync.role === 'viewer')
+    !demo &&
+    (locked || storageBlocked || Boolean(saved.sync.endpoint && saved.sync.role === 'viewer'))
 
   const notify = useCallback((message: string) => {
     setToast(message)
@@ -172,9 +180,17 @@ export function RallyProvider({ children }: { children: ReactNode }) {
         notify('This is a read-only view. Use the organizer device to make changes.')
         return
       }
+      if (demoRef.current) {
+        const currentDemo = demoRef.current
+        const nextDemo = reconcilePlans(currentDemo, { ...updater(currentDemo), version: 2 })
+        demoRef.current = nextDemo
+        setDemo(nextDemo)
+        return
+      }
       const current = ref.current
-      const data = updater(current.data)
-      if (data === current.data) return
+      const updated = updater(current.data)
+      if (updated === current.data) return
+      const data = reconcilePlans(current.data, { ...updated, version: 2 })
       replace({
         ...current,
         data,
@@ -186,6 +202,10 @@ export function RallyProvider({ children }: { children: ReactNode }) {
 
   const configureSync = useCallback(
     (endpoint: string, role: 'organizer' | 'viewer') => {
+      if (demoRef.current) {
+        notify('Exit demo mode to manage your real spreadsheet connection.')
+        return
+      }
       if (locked || storageBlocked) return
       const normalized = endpoint ? validateSheetEndpoint(endpoint) : ''
       const current = ref.current
@@ -208,13 +228,14 @@ export function RallyProvider({ children }: { children: ReactNode }) {
       })
       setSyncError(null)
     },
-    [locked, storageBlocked, replace],
+    [locked, storageBlocked, replace, notify],
   )
 
   const performSync = useCallback(
     async (resolution?: 'pull' | 'push') => {
       if (
         busy.current ||
+        demoRef.current ||
         locked ||
         storageBlocked ||
         !ready ||
@@ -227,6 +248,7 @@ export function RallyProvider({ children }: { children: ReactNode }) {
       const captured = ref.current
       try {
         const remote = await pullSheet(captured.sync.endpoint)
+        if (demoRef.current) return
         if (ref.current.sync.endpoint !== captured.sync.endpoint) return
         const current = ref.current
         if (resolution === 'pull' || current.sync.role === 'viewer') {
@@ -328,7 +350,7 @@ export function RallyProvider({ children }: { children: ReactNode }) {
   return (
     <Context.Provider
       value={{
-        data: saved.data,
+        data: demo ?? saved.data,
         ready,
         readOnly,
         persistStatus,
@@ -342,11 +364,89 @@ export function RallyProvider({ children }: { children: ReactNode }) {
         configureSync,
         syncNow: () => performSync(),
         resolveSync: (choice) => performSync(choice),
+        isDemo: Boolean(demo),
+        startDemo: () => {
+          if (busy.current) {
+            notify('Wait for the current sync to finish before entering the demo.')
+            return
+          }
+          const sample = createDemo()
+          const session = {
+            ...sample.sessions[0],
+            scoringMode: 'combined' as const,
+            planning: {
+              basis: 'matches' as const,
+              matchCount: 8,
+              durationMinutes: 90,
+              matchMinutes: 12,
+              changeoverMinutes: 2,
+            },
+          }
+          const planned = { ...session, plan: generatePlan(sample, session) }
+          const value: AppData = { ...sample, version: 2, sessions: [planned] }
+          demoRef.current = value
+          setDemo(value)
+          setSyncError(null)
+          notify('Demo sandbox opened. Nothing here changes your saved history.')
+        },
+        exitDemo: () => {
+          demoRef.current = null
+          setDemo(null)
+          notify('Demo closed. Your saved history is back.')
+        },
       }}
     >
       {children}
     </Context.Provider>
   )
+}
+
+function reconcilePlans(before: AppData, next: AppData): AppData {
+  const accepted = (data: AppData) =>
+    data.matches.filter((m) => m.status !== 'playing').map((m) => [m.id, m.status, m.revision])
+  const resultsChanged = JSON.stringify(accepted(before)) !== JSON.stringify(accepted(next))
+  const levelsChanged =
+    JSON.stringify(before.players.map((p) => [p.id, p.level])) !==
+    JSON.stringify(next.players.map((p) => [p.id, p.level]))
+  const sessions = next.sessions.map((session) => {
+    const previous = before.sessions.find((s) => s.id === session.id)
+    if (!previous || session.status !== 'active' || !session.plan || session.plan !== previous.plan)
+      return session
+    const availabilityChanged =
+      JSON.stringify([
+        session.playerIds,
+        session.availablePlayerIds,
+        session.attendance,
+        session.availability,
+        session.mode,
+        session.planning,
+      ]) !==
+      JSON.stringify([
+        previous.playerIds,
+        previous.availablePlayerIds,
+        previous.attendance,
+        previous.availability,
+        previous.mode,
+        previous.planning,
+      ])
+    if (!resultsChanged && !levelsChanged && !availabilityChanged) return session
+    try {
+      return replanSession(next, session)
+    } catch (error) {
+      return {
+        ...session,
+        plan: {
+          ...session.plan,
+          revision: session.plan.revision + 1,
+          warnings: [
+            ...session.plan.warnings,
+            `Schedule needs review: ${error instanceof Error ? error.message : 'availability changed'}`,
+          ],
+        },
+      }
+    }
+  })
+  return { ...next, sessions }
 }
 
 export function useRally() {

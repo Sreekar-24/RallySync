@@ -17,7 +17,7 @@ const at = 1_700_000_000_000
 function fixture(): AppData {
   const playerIds = Array.from({ length: 8 }, (_, index) => `p${index}`)
   return {
-    version: 1,
+    version: 2,
     players: playerIds.map((id, index) => ({
       id,
       name: `Player ${index + 1}`,
@@ -203,7 +203,7 @@ describe('backup validation', () => {
   })
 
   it('rejects unsupported versions and malformed field types', () => {
-    expect(() => validateData({ ...fixture(), version: 2 })).toThrow()
+    expect(() => validateData({ ...fixture(), version: 3 })).toThrow()
     expect(() => validateData({ ...fixture(), players: 'not-an-array' })).toThrow()
     const input = fixture()
     input.players[0].level = 6
@@ -274,7 +274,7 @@ describe('IndexedDB persistence', () => {
 
   it('replaces the previous snapshot instead of combining unrelated states', async () => {
     await saveState({ id: 'main', data: fixture(), sync: emptySync() })
-    const replacement: AppData = { version: 1, players: [], sessions: [], matches: [] }
+    const replacement: AppData = { version: 2, players: [], sessions: [], matches: [] }
     await saveState({ id: 'main', data: replacement, sync: emptySync() })
     expect((await loadState())!.data).toEqual(replacement)
   })
@@ -319,5 +319,165 @@ describe('IndexedDB persistence', () => {
     } finally {
       vi.unstubAllGlobals()
     }
+  })
+})
+
+describe('v2 migration and planning/credit records', () => {
+  function extended(): AppData {
+    const data = fixture()
+    const session = data.sessions[0]
+    session.scoringMode = 'combined'
+    session.planning = {
+      basis: 'matches',
+      matchCount: 8,
+      durationMinutes: 120,
+      matchMinutes: 12,
+      changeoverMinutes: 2,
+      weights: { fairness: 5, rest: 4, balance: 3, variety: 2, partnership: 1, contribution: 0 },
+    }
+    session.availability = { p7: { from: at + 60000, until: at + 120000 } }
+    session.plan = {
+      revision: 2,
+      generatedAt: at,
+      warnings: ['Times are estimates.'],
+      slots: [
+        {
+          id: 'slot-1',
+          court: 1,
+          round: 1,
+          startsAt: at,
+          teamA: ['p0', 'p1'],
+          teamB: ['p2', 'p3'],
+          locked: true,
+          matchId: 'match',
+          reason: 'Organizer lineup',
+        },
+        {
+          id: 'slot-2',
+          court: 2,
+          round: 1,
+          startsAt: at,
+          teamA: ['p4', 'p5'],
+          teamB: ['p6', 'p7'],
+          locked: false,
+          reason: 'Fair rest distribution',
+        },
+      ],
+    }
+    data.matches[0].planSlotId = 'slot-1'
+    data.matches[0].actions = [
+      { id: 'credited', kind: 'point', side: 'A', playerId: 'p0', at: at + 1000 },
+      {
+        id: 'corrected',
+        kind: 'adjust',
+        scores: [{ a: 5, b: 3, credits: { p0: 2, p1: 1, p2: 3 } }],
+        at: at + 2000,
+      },
+    ]
+    return data
+  }
+
+  it('migrates v1 without inventing individual points or changing source data', () => {
+    const legacy = { ...fixture(), version: 1 as const }
+    const result = validateData(legacy)
+    expect(result.version).toBe(2)
+    expect(legacy.version).toBe(1)
+    expect(result.matches[0].actions).toEqual(legacy.matches[0].actions)
+    expect(result.matches[0].actions[0].playerId).toBeUndefined()
+  })
+
+  it('accepts the known legacy recommendation reason without losing match results', () => {
+    const legacy = {
+      ...fixture(),
+      version: 1 as const,
+      matches: fixture().matches.map((match) => ({
+        ...match,
+        reason: 'Prioritizes less court time.',
+      })),
+    }
+    const migrated = validateData(legacy)
+    expect(migrated.matches).toEqual(fixture().matches)
+    expect(legacy.matches[0].reason).toBe('Prioritizes less court time.')
+    expect(() => validateData({ ...legacy, version: 2 })).toThrow()
+  })
+
+  it('round-trips the entire v2 schedule, availability, credit, and correction history', async () => {
+    const data = extended()
+    expect(validateData(data)).toEqual(data)
+    expect(await readBackup(new File([JSON.stringify({ data })], 'v2.json'))).toEqual(data)
+  })
+
+  it('rejects unknown future fields instead of silently discarding them', () => {
+    const data = { ...extended(), futureRules: { meaning: 'must not be lost' } }
+    expect(() => validateData(data)).toThrow()
+  })
+
+  it('rejects attributed points belonging to the opposing side or a non-participant', () => {
+    const data = extended()
+    data.matches[0].actions[0].playerId = 'p2'
+    expect(() => validateData(data)).toThrow('Invalid scoring events')
+    data.matches[0].actions[0].playerId = 'unknown'
+    expect(() => validateData(data)).toThrow('Invalid scoring events')
+  })
+
+  it('rejects excessive, negative, or foreign-player correction credits', () => {
+    const invalidCredits: Record<string, number>[] = [
+      { p0: 6 },
+      { p2: 4 },
+      { p0: -1 },
+      { unknown: 1 },
+    ]
+    for (const credits of invalidCredits) {
+      const data = extended()
+      data.matches[0].actions[1].scores![0].credits = credits
+      expect(() => validateData(data)).toThrow()
+    }
+  })
+
+  it('rejects invalid cap scores and games after a clinched match', () => {
+    const data = extended()
+    data.matches[0].actions[1].scores = [{ a: 30, b: 0 }]
+    expect(() => validateData(data)).toThrow('Invalid adjusted game score')
+    data.sessions[0].bestOf = 3
+    data.matches[0].actions[1].scores = [
+      { a: 21, b: 10 },
+      { a: 21, b: 12 },
+      { a: 0, b: 0 },
+    ]
+    expect(() => validateData(data)).toThrow('after the match was won')
+  })
+
+  it('rejects invalid schedule links, duplicate reservations, and availability windows', () => {
+    const changes = [
+      (d: AppData) => {
+        d.sessions[0].plan!.slots[0].matchId = 'unknown'
+      },
+      (d: AppData) => {
+        d.matches[0].planSlotId = 'unknown'
+      },
+      (d: AppData) => {
+        d.sessions[0].plan!.slots[1].teamA = ['p4', 'p4']
+      },
+      (d: AppData) => {
+        d.sessions[0].plan!.slots.push({ ...d.sessions[0].plan!.slots[1], id: 'slot-3' })
+      },
+      (d: AppData) => {
+        d.sessions[0].availability!.p7 = { from: at + 100, until: at }
+      },
+      (d: AppData) => {
+        d.sessions[0].availability!.unknown = { from: at }
+      },
+    ]
+    for (const change of changes) {
+      const data = extended()
+      change(data)
+      expect(() => validateData(data)).toThrow()
+    }
+  })
+
+  it('rejects timestamps outside the JavaScript Date range', () => {
+    const data = extended()
+    data.players[0].createdAt = 1e30
+    expect(() => validateData(data)).toThrow()
   })
 })

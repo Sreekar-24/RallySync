@@ -4,59 +4,154 @@ import type { AppData } from '../domain/model'
 
 const id = z.string().min(1).max(128)
 const time = z.number().finite().nonnegative().max(8.64e15)
-const playerSchema = z.object({
-  id,
-  name: z.string().trim().min(1).max(48),
-  level: z.number().int().min(1).max(5),
-  createdAt: time,
-})
-const sessionSchema = z.object({
-  id,
-  name: z.string().trim().min(1).max(80),
-  startedAt: time,
-  endedAt: time.optional(),
-  format: z.enum(['singles', 'doubles']),
-  courtCount: z.number().int().min(1).max(12),
-  target: z.number().int().min(1).max(99),
-  winBy: z.number().int().min(1).max(2),
-  cap: z.number().int().min(1).max(199),
-  bestOf: z.union([z.literal(1), z.literal(3)]),
-  mode: z.enum(['balanced', 'fair', 'variety']),
-  playerIds: z.array(id).max(200),
-  availablePlayerIds: z.array(id).max(200),
-  status: z.enum(['active', 'completed']),
-  attendance: z
-    .array(z.object({ playerId: id, at: time, available: z.boolean() }))
-    .max(100000)
-    .optional(),
-})
-const actionSchema = z.object({
-  id,
-  kind: z.enum(['point', 'undo']),
-  side: z.enum(['A', 'B']).optional(),
-  at: time,
-})
-const matchSchema = z.object({
-  id,
-  sessionId: id,
-  court: z.number().int().min(1).max(12),
-  teamA: z.array(id).min(1).max(2),
-  teamB: z.array(id).min(1).max(2),
-  startedAt: time,
-  endedAt: time.optional(),
-  status: z.enum(['playing', 'completed', 'abandoned']),
-  actions: z.array(actionSchema).max(20000),
-  revision: z.number().int().nonnegative(),
-})
-const dataSchema = z.object({
-  version: z.literal(1),
-  players: z.array(playerSchema).max(2000),
-  sessions: z.array(sessionSchema).max(10000),
-  matches: z.array(matchSchema).max(50000),
-})
+const scoreEntrySchema = z
+  .object({
+    a: z.number().int().min(0).max(199),
+    b: z.number().int().min(0).max(199),
+    credits: z.record(id, z.number().int().min(0).max(199)).optional(),
+  })
+  .strict()
+const playerSchema = z
+  .object({
+    id,
+    name: z.string().trim().min(1).max(48),
+    level: z.number().int().min(1).max(5),
+    createdAt: time,
+  })
+  .strict()
+const planningSchema = z
+  .object({
+    basis: z.enum(['matches', 'duration']),
+    matchCount: z.number().int().min(1).max(200),
+    durationMinutes: z.number().finite().min(1).max(1440),
+    matchMinutes: z.number().finite().min(1).max(180),
+    changeoverMinutes: z.number().finite().min(0).max(60),
+    weights: z
+      .object({
+        fairness: z.number().finite().min(0).max(100),
+        rest: z.number().finite().min(0).max(100),
+        balance: z.number().finite().min(0).max(100),
+        variety: z.number().finite().min(0).max(100),
+        partnership: z.number().finite().min(0).max(100),
+        contribution: z.number().finite().min(0).max(100),
+      })
+      .strict()
+      .optional(),
+  })
+  .strict()
+const slotSchema = z
+  .object({
+    id,
+    court: z.number().int().min(1).max(12),
+    round: z.number().int().min(1).max(200),
+    startsAt: time,
+    teamA: z.array(id).min(1).max(2),
+    teamB: z.array(id).min(1).max(2),
+    locked: z.boolean(),
+    matchId: id.optional(),
+    reason: z.string().max(1000),
+  })
+  .strict()
+const sessionSchema = z
+  .object({
+    id,
+    name: z.string().trim().min(1).max(80),
+    startedAt: time,
+    endedAt: time.optional(),
+    format: z.enum(['singles', 'doubles']),
+    courtCount: z.number().int().min(1).max(12),
+    target: z.number().int().min(1).max(99),
+    winBy: z.number().int().min(1).max(2),
+    cap: z.number().int().min(1).max(199),
+    bestOf: z.union([z.literal(1), z.literal(3)]),
+    mode: z.enum(['balanced', 'fair', 'variety']),
+    scoringMode: z.enum(['team', 'individual', 'combined']).optional(),
+    planning: planningSchema.optional(),
+    plan: z
+      .object({
+        revision: z.number().int().nonnegative(),
+        generatedAt: time,
+        slots: z.array(slotSchema).max(200),
+        warnings: z.array(z.string().max(1000)).max(200),
+      })
+      .strict()
+      .optional(),
+    availability: z
+      .record(id, z.object({ from: time.optional(), until: time.optional() }).strict())
+      .optional(),
+    playerIds: z.array(id).max(200),
+    availablePlayerIds: z.array(id).max(200),
+    status: z.enum(['active', 'completed']),
+    attendance: z
+      .array(z.object({ playerId: id, at: time, available: z.boolean() }).strict())
+      .max(100000)
+      .optional(),
+  })
+  .strict()
+const actionSchema = z
+  .object({
+    id,
+    kind: z.enum(['point', 'undo', 'adjust']),
+    side: z.enum(['A', 'B']).optional(),
+    playerId: id.optional(),
+    scores: z.array(scoreEntrySchema).min(1).max(3).optional(),
+    synthetic: z.boolean().optional(),
+    at: time,
+  })
+  .strict()
+const matchSchema = z
+  .object({
+    id,
+    sessionId: id,
+    court: z.number().int().min(1).max(12),
+    teamA: z.array(id).min(1).max(2),
+    teamB: z.array(id).min(1).max(2),
+    startedAt: time,
+    endedAt: time.optional(),
+    status: z.enum(['playing', 'completed', 'abandoned']),
+    actions: z.array(actionSchema).max(20000),
+    revision: z.number().int().nonnegative(),
+    planSlotId: id.optional(),
+  })
+  .strict()
+const dataSchema = z
+  .object({
+    version: z.union([z.literal(1), z.literal(2)]),
+    players: z.array(playerSchema).max(2000),
+    sessions: z.array(sessionSchema).max(10000),
+    matches: z.array(matchSchema).max(50000),
+  })
+  .strict()
 
+/** Validate without synthesizing attribution; legacy results migrate losslessly to v2. */
 export function validateData(input: unknown): AppData {
-  const parsed = dataSchema.parse(input)
+  // v0.1 accidentally spread its recommendation explanation onto a Match.
+  // Remove only that known, non-result legacy field; unknown v2 fields still fail.
+  let source = input
+  if (
+    typeof input === 'object' &&
+    input !== null &&
+    'version' in input &&
+    input.version === 1 &&
+    'matches' in input &&
+    Array.isArray(input.matches)
+  ) {
+    source = {
+      ...input,
+      matches: input.matches.map((match) => {
+        if (
+          typeof match !== 'object' ||
+          match === null ||
+          !('reason' in match) ||
+          typeof match.reason !== 'string'
+        )
+          return match
+        const { reason: _legacyReason, ...record } = match
+        return record
+      }),
+    }
+  }
+  const parsed = dataSchema.parse(source)
   const unique = (values: string[]) => new Set(values).size === values.length
   if (
     !unique(parsed.players.map((p) => p.id)) ||
@@ -66,6 +161,7 @@ export function validateData(input: unknown): AppData {
     throw new Error('The backup contains duplicate record IDs.')
   const players = new Set(parsed.players.map((p) => p.id))
   const sessions = new Map(parsed.sessions.map((s) => [s.id, s]))
+  const matches = new Map(parsed.matches.map((m) => [m.id, m]))
   if (parsed.sessions.filter((s) => s.status === 'active').length > 1)
     throw new Error('Only one active session is supported.')
   for (const s of parsed.sessions) {
@@ -78,6 +174,56 @@ export function validateData(input: unknown): AppData {
       s.attendance?.some((a) => !s.playerIds.includes(a.playerId))
     )
       throw new Error('Invalid session settings or player references.')
+    if (s.endedAt !== undefined && s.endedAt < s.startedAt)
+      throw new Error('A session cannot end before it starts.')
+    for (const [playerId, window] of Object.entries(s.availability ?? {})) {
+      if (
+        !s.playerIds.includes(playerId) ||
+        (window.from !== undefined && window.until !== undefined && window.from >= window.until)
+      )
+        throw new Error('Invalid player availability window.')
+    }
+    if (s.plan) {
+      if (!unique(s.plan.slots.map((slot) => slot.id)))
+        throw new Error('Duplicate schedule slot IDs.')
+      const reservations = new Set<string>()
+      const linkedMatches = new Set<string>()
+      for (const slot of s.plan.slots) {
+        const ids = [...slot.teamA, ...slot.teamB]
+        const size = s.format === 'singles' ? 1 : 2
+        if (
+          slot.court > s.courtCount ||
+          slot.teamA.length !== size ||
+          slot.teamB.length !== size ||
+          !unique(ids) ||
+          ids.some((p) => !s.playerIds.includes(p))
+        )
+          throw new Error('Invalid planned teams or court.')
+        if (slot.matchId) {
+          const linked = matches.get(slot.matchId)
+          if (
+            !linked ||
+            linked.sessionId !== s.id ||
+            linked.court !== slot.court ||
+            linkedMatches.has(slot.matchId) ||
+            linked.teamA.join('|') !== slot.teamA.join('|') ||
+            linked.teamB.join('|') !== slot.teamB.join('|')
+          )
+            throw new Error('Invalid schedule match reference.')
+          linkedMatches.add(slot.matchId)
+        }
+        // Finished slots retain their original estimates; only future reservations conflict.
+        if (!slot.matchId)
+          for (const key of [
+            `court:${slot.startsAt}:${slot.court}`,
+            ...ids.map((p) => `player:${slot.startsAt}:${p}`),
+          ]) {
+            if (reservations.has(key))
+              throw new Error('A planned court or player is assigned twice.')
+            reservations.add(key)
+          }
+      }
+    }
   }
   const occupied = new Set<string>()
   for (const m of parsed.matches) {
@@ -93,8 +239,62 @@ export function validateData(input: unknown): AppData {
       participants.some((p) => !s.playerIds.includes(p))
     )
       throw new Error('Invalid match participants or court.')
-    if (!unique(m.actions.map((a) => a.id)) || m.actions.some((a) => a.kind === 'point' && !a.side))
-      throw new Error('Invalid scoring events.')
+    if (m.endedAt !== undefined && m.endedAt < m.startedAt)
+      throw new Error('A match cannot end before it starts.')
+    if (!unique(m.actions.map((a) => a.id))) throw new Error('Invalid scoring events.')
+    for (const action of m.actions) {
+      if (action.playerId !== undefined && action.kind !== 'point')
+        throw new Error('Player credit is only valid on a point event.')
+      if (
+        action.kind === 'point' &&
+        (!action.side ||
+          (action.playerId !== undefined &&
+            !(action.side === 'A' ? m.teamA : m.teamB).includes(action.playerId)))
+      )
+        throw new Error('Invalid scoring events.')
+      if (action.kind === 'adjust') {
+        if (!action.scores || action.scores.length > s.bestOf)
+          throw new Error('Invalid score adjustment.')
+        let winsA = 0
+        let winsB = 0
+        const needed = s.bestOf === 3 ? 2 : 1
+        for (let i = 0; i < action.scores.length; i++) {
+          const game = action.scores[i]
+          if (winsA >= needed || winsB >= needed)
+            throw new Error('Adjustment contains games after the match was won.')
+          const high = Math.max(game.a, game.b),
+            low = Math.min(game.a, game.b)
+          const complete = high === s.cap || (high >= s.target && high - low >= s.winBy)
+          if (
+            high > s.cap ||
+            (complete &&
+              (game.a === game.b ||
+                (high > s.target && high < s.cap && high - low !== s.winBy) ||
+                (high === s.cap && s.cap > s.target && low < s.cap - s.winBy))) ||
+            (!complete && i < action.scores.length - 1)
+          )
+            throw new Error('Invalid adjusted game score.')
+          if (complete) {
+            if (game.a > game.b) winsA++
+            else winsB++
+          }
+          let creditA = 0,
+            creditB = 0
+          for (const [playerId, count] of Object.entries(game.credits ?? {})) {
+            if (!participants.includes(playerId))
+              throw new Error('Credit belongs to a player outside this match.')
+            if (m.teamA.includes(playerId)) creditA += count
+            else creditB += count
+          }
+          if (creditA > game.a || creditB > game.b)
+            throw new Error('Player credits exceed the side score.')
+        }
+      }
+    }
+    if (m.planSlotId) {
+      const slot = s.plan?.slots.find((slot) => slot.id === m.planSlotId)
+      if (!slot || slot.matchId !== m.id) throw new Error('Invalid match schedule link.')
+    }
     if (m.status === 'playing') {
       if (s.status !== 'active') throw new Error('A completed session contains an active match.')
       for (const key of [`court:${s.id}:${m.court}`, ...participants.map((p) => `player:${p}`)]) {
@@ -103,7 +303,7 @@ export function validateData(input: unknown): AppData {
       }
     }
   }
-  return parsed
+  return { ...parsed, version: 2 }
 }
 
 export interface SyncConfig {

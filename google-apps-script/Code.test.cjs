@@ -132,7 +132,7 @@ function harness({ configured = true } = {}) {
 
 function fixture() {
   return {
-    version: 1,
+    version: 2,
     players: ['p1', 'p2', 'p3', 'p4'].map((id, index) => ({
       id,
       name: `Player ${index + 1}`,
@@ -228,7 +228,7 @@ test('failed payload or manifest writes keep the old snapshot readable; retry re
 test('multi-chunk Unicode payload round-trips; only current and previous snapshots remain', () => {
   const api = harness()
   const big = {
-    version: 1,
+    version: 2,
     players: Array.from({ length: 900 }, (_, i) => ({
       id: `p${i}`,
       name: `Player ${i} 🏸 =safe`,
@@ -258,7 +258,7 @@ test('checksum corruption is reported rather than returning damaged data', () =>
 test('malformed schemas, unknown references, and invalid attendance are rejected', () => {
   const api = harness()
   const cases = [
-    { ...fixture(), version: 2 },
+    { ...fixture(), version: 3 },
     { ...fixture(), players: [] },
     { ...fixture(), matches: [{ ...fixture().matches[0], teamA: ['unknown'] }] },
     {
@@ -323,4 +323,144 @@ test('malformed requests, GET writes, and unsupported actions are rejected', () 
     api.decode(api.context.doGet({ parameter: { action: 'delete' } })).code,
     'INVALID_ACTION',
   )
+})
+
+test('v1 writes migrate to v2 without inferred player attribution and retry consistently', () => {
+  const api = harness(),
+    data = fixture()
+  data.version = 1
+  const first = api.push(data, 0, 'legacy-mutation')
+  assert.equal(first.ok, true)
+  assert.equal(first.data.version, 2)
+  assert.equal(first.data.matches[0].actions[0].playerId, undefined)
+  assert.equal(data.version, 1)
+  assert.equal(api.push(data, 0, 'legacy-mutation').revision, 1)
+})
+
+test('v2 plans, availability, attributed points and adjustments survive snapshot storage', () => {
+  const api = harness(),
+    data = fixture(),
+    s = data.sessions[0],
+    m = data.matches[0]
+  s.scoringMode = 'combined'
+  s.planning = {
+    basis: 'matches',
+    matchCount: 8,
+    durationMinutes: 120,
+    matchMinutes: 12,
+    changeoverMinutes: 2,
+    weights: { fairness: 5, rest: 4, balance: 3, variety: 2, partnership: 1, contribution: 0 },
+  }
+  s.availability = { p4: { from: 100, until: 1000 } }
+  s.plan = {
+    revision: 2,
+    generatedAt: 10,
+    warnings: ['Estimates only.'],
+    slots: [
+      {
+        id: 'slot1',
+        court: 1,
+        round: 1,
+        startsAt: 10,
+        teamA: ['p1'],
+        teamB: ['p2'],
+        locked: true,
+        matchId: 'match1',
+        reason: 'Organizer assignment',
+      },
+      {
+        id: 'slot2',
+        court: 2,
+        round: 1,
+        startsAt: 10,
+        teamA: ['p3'],
+        teamB: ['p4'],
+        locked: false,
+        reason: 'Equal opportunity',
+      },
+    ],
+  }
+  m.planSlotId = 'slot1'
+  m.actions = [
+    { id: 'point', kind: 'point', side: 'A', playerId: 'p1', at: 12 },
+    { id: 'adjust', kind: 'adjust', scores: [{ a: 5, b: 3, credits: { p1: 3, p2: 2 } }], at: 15 },
+  ]
+  assert.equal(api.push(data, 0, 'v2-mutation').ok, true)
+  assert.deepEqual(api.pull().data, data)
+  const mutations = [
+    (d) => {
+      d.matches[0].actions[0].playerId = 'p2'
+    },
+    (d) => {
+      d.matches[0].actions[1].scores[0].credits = { p1: 6 }
+    },
+    (d) => {
+      d.matches[0].actions[1].scores[0].credits = { unknown: 1 }
+    },
+    (d) => {
+      d.matches[0].actions[1].scores = [{ a: 30, b: 0 }]
+    },
+    (d) => {
+      d.sessions[0].plan.slots[0].matchId = 'unknown'
+    },
+    (d) => {
+      d.sessions[0].plan.slots.push({ ...d.sessions[0].plan.slots[1], id: 'slot3' })
+    },
+    (d) => {
+      d.sessions[0].availability.p4 = { from: 100, until: 20 }
+    },
+    (d) => {
+      d.sessions[0].planning.weights.fairness = -1
+    },
+  ]
+  for (const change of mutations) {
+    const bad = JSON.parse(JSON.stringify(data))
+    change(bad)
+    assert.equal(api.push(bad, 1, 'invalid-new-v2').code, 'INVALID_DATA')
+  }
+  assert.deepEqual(api.pull().data, data)
+})
+
+test('known legacy recommendation fields migrate without blocking old real matches', () => {
+  const api = harness(),
+    data = fixture()
+  data.version = 1
+  data.matches[0].reason = 'Balanced recommendation'
+  const result = api.push(data, 0, 'legacy-with-reason')
+  assert.equal(result.ok, true)
+  assert.equal(result.data.version, 2)
+  assert.equal(result.data.matches[0].reason, undefined)
+  assert.deepEqual(result.data.matches[0].actions, data.matches[0].actions)
+  assert.equal(data.matches[0].reason, 'Balanced recommendation')
+})
+
+test('reads an already-stored v1 snapshot after verifying its original checksum', () => {
+  const api = harness()
+  api.push(fixture(), 0, 'before-upgrade')
+  const legacy = fixture()
+  legacy.version = 1
+  legacy.matches[0].reason = 'Original v0.1 recommendation'
+  const raw = JSON.stringify(legacy)
+  api.book.sheets._RallyChunks.rows[1][2] = 'b64:' + Buffer.from(raw).toString('base64')
+  api.book.sheets._RallyState.rows[1][5] = crypto.createHash('sha256').update(raw).digest('hex')
+  const result = api.pull()
+  assert.equal(result.ok, true)
+  assert.equal(result.data.version, 2)
+  assert.equal(result.data.matches[0].reason, undefined)
+  assert.deepEqual(result.data.matches[0].actions, legacy.matches[0].actions)
+})
+
+test('rejects unknown v2 fields and prototype-property payloads instead of losing them', () => {
+  const api = harness()
+  const unknown = fixture()
+  unknown.matches[0].futureScoring = true
+  assert.equal(api.push(unknown, 0, 'unknown-fields').code, 'INVALID_DATA')
+  const malicious = JSON.parse(
+    JSON.stringify({ ...fixture(), version: 1 }).replace(
+      '"players":',
+      '"__proto__":{"injected":true},"players":',
+    ),
+  )
+  assert.equal(api.push(malicious, 0, 'bad-prototype').code, 'INVALID_DATA')
+  assert.equal(api.pull().revision, 0)
 })

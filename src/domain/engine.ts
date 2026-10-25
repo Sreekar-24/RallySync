@@ -9,135 +9,209 @@ import type {
   Side,
 } from './model'
 
-function tally(points: Side[], session: Session): MatchScore {
-  const target = Math.max(1, session.target)
-  const winBy = Math.max(1, session.winBy)
-  const cap = Math.max(target, session.cap)
-  const needed = session.bestOf === 3 ? 2 : 1
-  const score: MatchScore = { a: 0, b: 0, gamesA: 0, gamesB: 0, games: [], complete: false }
+export interface ScoreEntry {
+  a: number
+  b: number
+  credits?: Record<string, number>
+}
+type GameState = { a: number; b: number; credits: Record<string, number> }
+const emptyGame = (): GameState => ({ a: 0, b: 0, credits: {} })
+const cloneGames = (games: GameState[]): GameState[] =>
+  games.map((g) => ({ ...g, credits: { ...g.credits } }))
 
-  for (const side of points) {
-    if (score.complete) break
-    if (side === 'A') score.a += 1
-    else score.b += 1
-
-    const high = Math.max(score.a, score.b)
-    if (high < cap && (high < target || Math.abs(score.a - score.b) < winBy)) continue
-    const winner: Side = score.a > score.b ? 'A' : 'B'
-    score.games.push({ a: score.a, b: score.b, winner })
-    if (winner === 'A') score.gamesA += 1
-    else score.gamesB += 1
-    if (score.gamesA === needed || score.gamesB === needed) {
-      score.complete = true
-      score.winner = winner
-    } else {
-      score.a = 0
-      score.b = 0
-    }
-  }
-  return score
+function winningSide(game: Pick<GameState, 'a' | 'b'>, session: Session): Side | undefined {
+  const high = Math.max(game.a, game.b)
+  if (game.a === game.b || high < session.target) return
+  if (high >= session.cap || Math.abs(game.a - game.b) >= session.winBy)
+    return game.a > game.b ? 'A' : 'B'
 }
 
-function replayScoreActions(match: Match, session: Session): { score: MatchScore; points: Side[] } {
-  const points: Side[] = []
+/** A legal score must be reachable without continuing past an earlier game point. */
+function validateGameScore(game: ScoreEntry, session: Session): void {
+  const { a, b } = game
+  if (
+    !Number.isInteger(a) ||
+    !Number.isInteger(b) ||
+    a < 0 ||
+    b < 0 ||
+    Math.max(a, b) > session.cap
+  )
+    throw new Error('Scores must be whole numbers between 0 and the game cap.')
+  const winner = winningSide(game, session)
+  if (Math.max(a, b) === session.cap && !winner)
+    throw new Error('A game cannot be tied at its score cap.')
+  if (winner) {
+    const prior = { a: a - Number(winner === 'A'), b: b - Number(winner === 'B') }
+    if (winningSide(prior, session))
+      throw new Error(
+        `That game would have ended earlier. Reach ${session.target}, win by ${session.winBy}, cap ${session.cap}.`,
+      )
+  }
+}
+
+function validateEntries(match: Match, session: Session, entries: ScoreEntry[]): GameState[] {
+  if (!entries.length || entries.length > session.bestOf)
+    throw new Error('Enter games in order, within the match length.')
+  let aWins = 0
+  let bWins = 0
+  const needed = session.bestOf === 3 ? 2 : 1
+  const output: GameState[] = []
+  for (let i = 0; i < entries.length; i++) {
+    if (aWins >= needed || bWins >= needed)
+      throw new Error('Remove games entered after the match was already won.')
+    const entry = entries[i]
+    validateGameScore(entry, session)
+    const credits = { ...(entry.credits ?? {}) }
+    for (const [id, value] of Object.entries(credits)) {
+      if (![...match.teamA, ...match.teamB].includes(id) || !Number.isInteger(value) || value < 0)
+        throw new Error(
+          'Credited points must belong to a player in this match and be non-negative whole numbers.',
+        )
+    }
+    const sum = (ids: string[]) => ids.reduce((total, id) => total + (credits[id] ?? 0), 0)
+    if (sum(match.teamA) > entry.a || sum(match.teamB) > entry.b)
+      throw new Error(
+        'Player credits exceed the side’s total. Adjust player points, or choose unassigned points.',
+      )
+    const winner = winningSide(entry, session)
+    if (!winner && i < entries.length - 1)
+      throw new Error('Finish a game before entering the next one.')
+    if (winner === 'A') aWins++
+    else if (winner === 'B') bWins++
+    output.push({ a: entry.a, b: entry.b, credits })
+  }
+  if (winningSide(output.at(-1)!, session) && aWins < needed && bWins < needed)
+    output.push(emptyGame())
+  return output
+}
+
+function describeScore(games: GameState[], session: Session): MatchScore {
+  const completed: MatchScore['games'] = []
+  let gamesA = 0
+  let gamesB = 0
+  const needed = session.bestOf === 3 ? 2 : 1
+  const allCredits: Record<string, number> = {}
+  let totalPoints = 0
+  for (const game of games) {
+    totalPoints += game.a + game.b
+    for (const [id, points] of Object.entries(game.credits))
+      allCredits[id] = (allCredits[id] ?? 0) + points
+    const winner = winningSide(game, session)
+    if (winner) {
+      completed.push({ a: game.a, b: game.b, winner })
+      if (winner === 'A') gamesA++
+      else gamesB++
+    }
+  }
+  const complete = gamesA >= needed || gamesB >= needed
+  const current = games.at(-1) ?? emptyGame()
+  return {
+    a: current.a,
+    b: current.b,
+    gamesA,
+    gamesB,
+    games: completed,
+    complete,
+    winner: complete ? (gamesA >= needed ? 'A' : 'B') : undefined,
+    credits: { ...current.credits },
+    allCredits,
+    totalPoints,
+    attributedPoints: Object.values(allCredits).reduce((a, b) => a + b, 0),
+  }
+}
+
+function replayScoreActions(
+  match: Match,
+  session: Session,
+): { score: MatchScore; games: GameState[]; undoDepth: number } {
+  let games = [emptyGame()]
+  const history: GameState[][] = []
   const seen = new Set<string>()
-  let score = tally(points, session)
   for (const action of match.actions) {
-    // A retried command must not add another point (or apply undo twice).
     if (seen.has(action.id)) continue
     seen.add(action.id)
     if (action.kind === 'undo') {
-      points.pop()
-    } else if ((action.side === 'A' || action.side === 'B') && !score.complete) {
-      points.push(action.side)
-    } else {
+      if (history.length) games = history.pop()!
       continue
     }
-    score = tally(points, session)
+    if (action.kind === 'adjust' && action.scores) {
+      try {
+        const adjusted = validateEntries(match, session, action.scores)
+        history.push(cloneGames(games))
+        games = adjusted
+      } catch {
+        /* Invalid imported actions cannot corrupt a verified score. */
+      }
+      continue
+    }
+    if (action.kind !== 'point' || !action.side || describeScore(games, session).complete) continue
+    history.push(cloneGames(games))
+    const next = cloneGames(games)
+    const game = next.at(-1)!
+    if (action.side === 'A') game.a++
+    else game.b++
+    const team = action.side === 'A' ? match.teamA : match.teamB
+    if (action.playerId && team.includes(action.playerId) && !action.synthetic)
+      game.credits[action.playerId] = (game.credits[action.playerId] ?? 0) + 1
+    const summary = describeScore(next, session)
+    if (winningSide(game, session) && !summary.complete) next.push(emptyGame())
+    games = next
   }
-  return { score, points }
+  return { score: describeScore(games, session), games, undoDepth: history.length }
 }
 
-/** Replays the immutable action log, including undo across game boundaries. */
+/** Replays legacy rallies and explicit adjustments. Undo restores one whole previous operation. */
 export function scoreMatch(match: Match, session: Session): MatchScore {
   return replayScoreActions(match, session).score
 }
 
-/**
- * Builds a final-score entry or correction without deleting the prior audit
- * log. The generated sequence represents the score, not an observed rally
- * sequence; it must not be used for momentum or individual-event analytics.
- */
+export function canUndoScore(match: Match, session: Session): boolean {
+  return replayScoreActions(match, session).undoDepth > 0
+}
+
+/** Completed games plus the current game. No synthetic rally-order claims are made. */
+export function getScoreEntries(match: Match, session: Session): GameState[] {
+  return cloneGames(replayScoreActions(match, session).games)
+}
+
+export function adjustMatchScores(
+  match: Match,
+  session: Session,
+  entries: ScoreEntry[],
+  now = Date.now(),
+): Match {
+  const old = getScoreEntries(match, session)
+  const withCredits = entries.map((entry, i) => ({
+    ...entry,
+    credits: entry.credits ?? old[i]?.credits ?? {},
+  }))
+  const verified = validateEntries(match, session, withCredits)
+  // Omit an implicit empty game from the event; replay will reopen it as needed.
+  const scores =
+    verified.length > 1 && verified.at(-1)!.a === 0 && verified.at(-1)!.b === 0
+      ? verified.slice(0, -1)
+      : verified
+  return {
+    ...match,
+    status: 'playing',
+    endedAt: undefined,
+    revision: match.revision + 1,
+    actions: [...match.actions, { id: crypto.randomUUID(), kind: 'adjust', at: now, scores }],
+  }
+}
+
+/** An accepted result uses one auditable correction, never fabricated per-rally history. */
 export function buildFinalResult(
   match: Match,
   session: Session,
-  games: { a: number; b: number }[],
+  entries: ScoreEntry[],
   now = Date.now(),
 ): Match {
-  if (!games.length) throw new Error('Enter at least one complete game.')
-  if (games.length > session.bestOf)
-    throw new Error('Remove games entered after the match was already won.')
-  const needed = session.bestOf === 3 ? 2 : 1
-  let aWins = 0
-  let bWins = 0
-  const newPoints: Side[] = []
-  for (const game of games) {
-    if (aWins >= needed || bWins >= needed)
-      throw new Error('Remove games entered after the match was already won.')
-    const { a, b } = game
-    if (
-      !Number.isInteger(a) ||
-      !Number.isInteger(b) ||
-      a < 0 ||
-      b < 0 ||
-      a === b ||
-      Math.max(a, b) > session.cap
-    ) {
-      throw new Error(
-        `Check game scores: reach ${session.target}, win by ${session.winBy}, cap ${session.cap}.`,
-      )
-    }
-    const winner: Side = a > b ? 'A' : 'B'
-    const loser: Side = winner === 'A' ? 'B' : 'A'
-    const low = Math.min(a, b)
-    const high = Math.max(a, b)
-    const gamePoints: Side[] = []
-    for (let i = 0; i < low; i++) gamePoints.push(winner, loser)
-    for (let i = low; i < high; i++) gamePoints.push(winner)
-    const verified = tally(gamePoints, { ...session, bestOf: 1 })
-    // Merely reaching the cap is insufficient: 30–0 would have ended at 21–0.
-    if (!verified.complete || verified.a !== a || verified.b !== b) {
-      throw new Error(
-        `Check game scores: reach ${session.target}, win by ${session.winBy}, cap ${session.cap}.`,
-      )
-    }
-    newPoints.push(...gamePoints)
-    if (winner === 'A') aWins += 1
-    else bWins += 1
-  }
-  if (aWins < needed && bWins < needed) throw new Error('Enter enough games to decide the match.')
-  const effectivePoints = replayScoreActions(match, session).points.length
-  const actions = [...match.actions]
-  for (let i = 0; i < effectivePoints; i++)
-    actions.push({ id: crypto.randomUUID(), kind: 'undo', at: now })
-  for (const side of newPoints)
-    actions.push({ id: crypto.randomUUID(), kind: 'point', side, at: now })
-  const changed: Match = {
-    ...match,
-    actions,
-    revision: match.revision + 1,
-    status: 'completed',
-    endedAt: match.endedAt ?? now,
-  }
-  const verified = scoreMatch(changed, session)
-  if (
-    !verified.complete ||
-    verified.games.length !== games.length ||
-    verified.games.some((game, index) => game.a !== games[index].a || game.b !== games[index].b)
-  ) {
-    throw new Error('The result could not be verified. Please check the game scores.')
-  }
-  return changed
+  if (!entries.length) throw new Error('Enter at least one complete game.')
+  const changed = adjustMatchScores(match, session, entries, now)
+  if (!scoreMatch(changed, session).complete)
+    throw new Error('Enter enough games to decide the match.')
+  return { ...changed, status: 'completed', endedAt: match.endedAt ?? now }
 }
 
 function baseRating(player: Player): number {
@@ -358,7 +432,12 @@ export function suggestMatch(
   const playerMap = new Map(data.players.map((player) => [player.id, player]))
   const membership = new Set(session.playerIds)
   const eligible = [...new Set(session.availablePlayerIds)].filter(
-    (id) => membership.has(id) && playerMap.has(id) && !busy.has(id),
+    (id) =>
+      membership.has(id) &&
+      playerMap.has(id) &&
+      !busy.has(id) &&
+      (session.availability?.[id]?.from ?? -Infinity) <= now &&
+      (session.availability?.[id]?.until ?? Infinity) > now,
   )
   const teamSize = session.format === 'singles' ? 1 : 2
   if (eligible.length < teamSize * 2) return null

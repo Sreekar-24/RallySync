@@ -1,3 +1,4 @@
+import { seedRealDemo } from './helpers'
 import { test, expect } from '@playwright/test'
 
 test('installs its service worker and reloads cached screens offline without losing scores', async ({
@@ -8,7 +9,7 @@ test('installs its service worker and reloads cached screens offline without los
   await page.evaluate(async () => {
     await navigator.serviceWorker.ready
   })
-  await page.getByRole('button', { name: 'Explore a demo' }).click()
+  await seedRealDemo(page)
   await page.getByRole('button', { name: 'Start match', exact: true }).first().click()
   await page.getByRole('button', { name: 'Point to side A' }).click()
   await page.getByRole('button', { name: 'Close dialog', exact: true }).click()
@@ -43,7 +44,7 @@ test('serves valid install assets at the repository base path', async ({ request
 
 test('prevents two tabs from editing the same local clubhouse', async ({ page, context }) => {
   await page.goto('./')
-  await page.getByRole('button', { name: 'Explore a demo' }).click()
+  await seedRealDemo(page)
   const second = await context.newPage()
   await second.goto('./')
   await expect(second.locator('.app-notice')).toContainText('Another tab is editing')

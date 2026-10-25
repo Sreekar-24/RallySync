@@ -27,6 +27,14 @@ this exact browser-only integration will not work. Keep using local mode, or
 implement an authenticated Google API flow; do not make the spreadsheet publicly
 editable to work around it.
 
+## Upgrade an existing deployment
+
+This release writes **snapshot version 2**, adding whole-session schedules, availability windows, player-attributed points, and direct score adjustments. Existing version-1 backups and stored snapshots migrate without changing results or inventing individual contributions.
+
+Replace the Apps Script source with this version and publish a **new deployment version** before enabling Sheets synchronization in the updated app. Running `setup()` again preserves the spreadsheet. Update every organizer/viewer to the new web app before editing; old clients deliberately reject v2 snapshots rather than silently losing new fields. An old deployed script rejects v2 uploads, so local scores remain safe but synchronization reports an error until the script is upgraded.
+
+The storage manifest and HTTP protocol are unchanged. Do not clear the storage tabs to upgrade.
+
 ## Create and deploy
 
 1. Create a **dedicated** Google Sheet in the account that will maintain it.
@@ -92,7 +100,7 @@ Owner authorization can additionally involve Google's account pages.
 { "ok": true, "data": null, "revision": 0, "updatedAt": 0 }
 ```
 
-After a successful write, `data` contains the complete version-1 `AppData`, and
+After a successful write, `data` contains the complete version-2 `AppData`, and
 `mutationId` identifies the last committed update.
 
 `POST /exec` accepts JSON as **text/plain**, not an HTML form:

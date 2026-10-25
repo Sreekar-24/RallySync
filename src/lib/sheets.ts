@@ -72,7 +72,7 @@ function decodeSnapshot(value: unknown): SheetSnapshot {
     data !== null &&
     (!data ||
       typeof data !== 'object' ||
-      (data as AppData).version !== 1 ||
+      ![1, 2].includes((data as AppData).version) ||
       !Array.isArray((data as AppData).players) ||
       !Array.isArray((data as AppData).sessions) ||
       !Array.isArray((data as AppData).matches))

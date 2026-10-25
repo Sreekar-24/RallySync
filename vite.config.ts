@@ -4,6 +4,17 @@ import { VitePWA } from 'vite-plugin-pwa'
 
 export default defineConfig({
   base: process.env.VITE_BASE_PATH || '/RallySync/',
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (/node_modules\/(react|react-dom|scheduler)\//.test(id)) return 'react-vendor'
+          if (/node_modules\/zod\//.test(id)) return 'validation'
+          if (/node_modules\/dexie\//.test(id)) return 'storage'
+        },
+      },
+    },
+  },
   plugins: [
     react(),
     VitePWA({

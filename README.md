@@ -2,21 +2,31 @@
 
 **Less organizing. More badminton.** A responsive, installable courtside companion for your regular crew, hosted as a static app with no required backend or player accounts.
 
-Interface previews: [desktop clubhouse](docs/screenshots/desktop.png) · [mobile scoring](docs/screenshots/mobile-scoring.png) · [interactive rules](docs/screenshots/rules.png).
+Interface previews: [desktop clubhouse](docs/screenshots/desktop.png) · [mobile scoring](docs/screenshots/mobile-scoring.png) · [interactive rules](docs/screenshots/rules.png) · [full schedule](docs/screenshots/schedule.png) · [partnership insights](docs/screenshots/partnerships.png).
 
 ## What works
 
-- Create singles or doubles sessions, with up to six courts in the interface.
-- Add guests by name, estimate starting skill, and track late arrivals and breaks.
-- Suggest lineups using available court opportunity, elapsed playing time, waiting time, provisional strength, and partner variety. Manually adjust teams anytime before starting.
-- Score rally by rally, undo, or enter final game scores. Supports 11/15-point house games, 21-point games, win-by-two, caps, and one-game or best-of-three matches.
-- Preserve completed, stopped, and active matches. Correct accepted results with an auditable scoring log; rankings recalculate.
-- View overall, today, or session standings and match history. Points are credited to sides, not attributed to individual winners/errors.
-- Learn service positioning through an interactive court, searchable rules, and official/house-rule distinctions.
-- Use offline after initial caching. Export complete JSON backups, restore with validation, and export spreadsheet-safe CSV results.
-- Optionally connect Google Sheets through the included Apps Script: one organizer writer, polling viewers, revision checks, and explicit conflict resolution.
+- Singles and doubles sessions, with up to six courts, player attendance, breaks, arrival and departure windows.
+- Full-session schedules based on total match count or estimated hours, match length, and changeovers. Review all rounds, playing/rest time, and planning tradeoffs before playing.
+- Weighted fair, balanced, or social-variety recommendations using court opportunity, play/rest sequences, provisional strength, partner/opponent history, and conservative partnership evidence. Contribution weighting is opt-in and requires sufficient attribution coverage.
+- Lock future lineups, edit pairings, swap an equivalent future matchup where practical, and repair remaining assignments. Active/completed matches stay intact.
+- Team, individual, or combined doubles scoring: a credited player point adds exactly one to their side. Unassigned points remain explicit.
+- Editable totals and per-game/player allocation, atomic undo, deuce/caps, 11/15-point house games, 21-point games, and one-game/best-of-three matches. A winning score is provisional until **Confirm result**.
+- Correct accepted results from History or the schedule without double-counting a match. Delete one session without clearing unrelated sessions or player identities.
+- All-time, today, custom-date, session, format, and selected-player rankings. Compare partnerships, opposing sides, contribution coverage, and participation. Weighted performance and provisional strength are explained separately from wins.
+- Scoped JSON/CSV analysis exports and print-ready PDF reports. Complete JSON backups remain a separate recovery format.
+- Optional external LLM planning: export context/prompt, import revision-checked JSON, preview, and apply. No AI API or subscription is needed by the app.
+- Searchable rules and an interactive service-court guide.
+- Offline PWA with **in-memory demo isolation**. Exit or reload to return to real data; demo changes never save or upload. Settings includes targeted cleanup for sample data from v0.1.
+- Optional Google Sheets snapshot sync with one organizer writer, polling viewers, and explicit conflict resolution.
 
-This first release does **not** implement tournament brackets, timed-match endings, handicap points, shot attribution, user authentication, or automatic merging of independently edited histories. The rules guide describes some formats beyond the implemented scoring controls. Do not mistake house presets or provisional ratings for official competition certification.
+The planner is a bounded, explainable heuristic rather than a trained ML model or a proof of optimal fairness. Availability and hard constraints take precedence; estimates and subjective credited points do not establish actual rally order or objective individual ability. Tournament brackets, timed-match stopping rules, handicap scoring, authentication, and automatic multi-writer merging remain outside this release.
+
+## Upgrading from v0.1
+
+Existing version-1 histories are migrated to version 2 without inventing individual attribution. Download a backup before updating important histories. If you use Google Sheets, **redeploy the updated Apps Script before syncing v2 data**, then update the other devices. The old script rejects v2 rather than silently discarding new fields. See the [upgrade guide](google-apps-script/README.md).
+
+The improved demo no longer uses real storage. Old persisted sample records are not silently removed; review **Settings → Sample data from the first version? → Review cleanup**. Renamed sample profiles and those referenced by real sessions are preserved.
 
 ## Develop
 

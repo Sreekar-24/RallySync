@@ -1,5 +1,5 @@
 /**
- * RallySync optional Google Sheets bridge, protocol v1.
+ * RallySync optional Google Sheets bridge, snapshot schema v2 (legacy v1 imports supported).
  * This is a single-writer shared snapshot store, not a public multi-tenant API.
  * See README.md before deploying, especially the deployment-access warning.
  */
@@ -115,6 +115,7 @@ function dispatch_(action, request) {
         error: 'A revision and unique mutation ID are required.',
       })
     }
+    request.data = migrateLegacy_(request.data)
     var validation = validateData_(request.data)
     if (validation) return json_({ ok: false, code: 'INVALID_DATA', error: validation })
     var raw = JSON.stringify(request.data)
@@ -263,7 +264,7 @@ function snapshot_(chunks, manifest) {
   if (payloads.length !== manifest.chunkCount) throw new Error('Invalid chunk count.')
   var raw = Utilities.newBlob(Utilities.base64Decode(payloads.join(''))).getDataAsString('UTF-8')
   if (sha256_(raw) !== manifest.digest) throw new Error('Snapshot checksum mismatch.')
-  var data = JSON.parse(raw)
+  var data = migrateLegacy_(JSON.parse(raw))
   if (validateData_(data)) throw new Error('Invalid snapshot data.')
   return {
     ok: true,
@@ -302,7 +303,7 @@ function integer_(value, min, max) {
 }
 
 function finite_(value) {
-  return typeof value === 'number' && isFinite(value) && value >= 0
+  return typeof value === 'number' && isFinite(value) && value >= 0 && value <= 8.64e15
 }
 function id_(value) {
   return typeof value === 'string' && value.length > 0 && value.length <= 128
@@ -323,8 +324,8 @@ function ids_(values, known) {
 /** Reject malformed snapshots before they can replace the canonical history. */
 function validateData_(data) {
   if (
-    !data ||
-    data.version !== 1 ||
+    !onlyKeys_(data, ['version', 'players', 'sessions', 'matches']) ||
+    [1, 2].indexOf(data.version) < 0 ||
     !Array.isArray(data.players) ||
     !Array.isArray(data.sessions) ||
     !Array.isArray(data.matches)
@@ -341,7 +342,7 @@ function validateData_(data) {
   for (i = 0; i < data.players.length; i++) {
     p = data.players[i]
     if (
-      !p ||
+      !onlyKeys_(p, ['id', 'name', 'level', 'createdAt']) ||
       !id_(p.id) ||
       players[p.id] ||
       !name_(p.name) ||
@@ -355,7 +356,27 @@ function validateData_(data) {
   for (i = 0; i < data.sessions.length; i++) {
     s = data.sessions[i]
     if (
-      !s ||
+      !onlyKeys_(s, [
+        'id',
+        'name',
+        'startedAt',
+        'endedAt',
+        'format',
+        'courtCount',
+        'target',
+        'winBy',
+        'cap',
+        'bestOf',
+        'mode',
+        'scoringMode',
+        'planning',
+        'plan',
+        'availability',
+        'playerIds',
+        'availablePlayerIds',
+        'attendance',
+        'status',
+      ]) ||
       !id_(s.id) ||
       sessions[s.id] ||
       !name_(s.name) ||
@@ -385,10 +406,10 @@ function validateData_(data) {
     if (
       s.attendance !== undefined &&
       (!Array.isArray(s.attendance) ||
-        s.attendance.length > 50000 ||
+        s.attendance.length > 100000 ||
         s.attendance.some(function (entry) {
           return (
-            !entry ||
+            !onlyKeys_(entry, ['playerId', 'at', 'available']) ||
             !members[entry.playerId] ||
             !finite_(entry.at) ||
             typeof entry.available !== 'boolean'
@@ -396,12 +417,113 @@ function validateData_(data) {
         }))
     )
       return 'Invalid attendance events.'
+    if (s.endedAt !== undefined && s.endedAt < s.startedAt)
+      return 'A session cannot end before it starts.'
+    if (
+      s.scoringMode !== undefined &&
+      ['team', 'individual', 'combined'].indexOf(s.scoringMode) < 0
+    )
+      return 'Invalid scoring mode.'
+    if (s.planning !== undefined && !planning_(s.planning)) return 'Invalid planning settings.'
+    if (s.availability !== undefined) {
+      if (!record_(s.availability)) return 'Invalid availability windows.'
+      var windows = Object.keys(s.availability)
+      for (var w = 0; w < windows.length; w++) {
+        var window = s.availability[windows[w]]
+        if (
+          !members[windows[w]] ||
+          !onlyKeys_(window, ['from', 'until']) ||
+          (window.from !== undefined && !finite_(window.from)) ||
+          (window.until !== undefined && !finite_(window.until)) ||
+          (window.from !== undefined && window.until !== undefined && window.from >= window.until)
+        )
+          return 'Invalid availability window.'
+      }
+    }
+    if (s.plan !== undefined) {
+      var plan = s.plan
+      if (
+        !onlyKeys_(plan, ['revision', 'generatedAt', 'slots', 'warnings']) ||
+        !integer_(plan.revision, 0, Number.MAX_SAFE_INTEGER) ||
+        !finite_(plan.generatedAt) ||
+        !Array.isArray(plan.slots) ||
+        plan.slots.length > 200 ||
+        !Array.isArray(plan.warnings) ||
+        plan.warnings.length > 200 ||
+        plan.warnings.some(function (v) {
+          return typeof v !== 'string' || v.length > 1000
+        })
+      )
+        return 'Invalid session plan.'
+      var slots = Object.create(null),
+        reservations = Object.create(null),
+        linked = Object.create(null)
+      for (var n = 0; n < plan.slots.length; n++) {
+        var slot = plan.slots[n],
+          teamSize = s.format === 'singles' ? 1 : 2
+        if (
+          !onlyKeys_(slot, [
+            'id',
+            'court',
+            'round',
+            'startsAt',
+            'teamA',
+            'teamB',
+            'locked',
+            'matchId',
+            'reason',
+          ]) ||
+          !id_(slot.id) ||
+          slots[slot.id] ||
+          !integer_(slot.court, 1, s.courtCount) ||
+          !integer_(slot.round, 1, 200) ||
+          !finite_(slot.startsAt) ||
+          typeof slot.locked !== 'boolean' ||
+          typeof slot.reason !== 'string' ||
+          slot.reason.length > 1000 ||
+          !Array.isArray(slot.teamA) ||
+          !Array.isArray(slot.teamB) ||
+          slot.teamA.length !== teamSize ||
+          slot.teamB.length !== teamSize ||
+          !ids_(slot.teamA.concat(slot.teamB), members) ||
+          (slot.matchId !== undefined && !id_(slot.matchId))
+        )
+          return 'Invalid planned match.'
+        slots[slot.id] = true
+        if (slot.matchId) {
+          if (linked[slot.matchId]) return 'Duplicate linked match.'
+          linked[slot.matchId] = true
+        } else {
+          var keys = ['court:' + slot.startsAt + ':' + slot.court].concat(
+            slot.teamA.concat(slot.teamB).map(function (id) {
+              return 'player:' + slot.startsAt + ':' + id
+            }),
+          )
+          for (var r = 0; r < keys.length; r++) {
+            if (reservations[keys[r]]) return 'A planned court or player is assigned twice.'
+            reservations[keys[r]] = true
+          }
+        }
+      }
+    }
     sessions[s.id] = s
   }
   for (i = 0; i < data.matches.length; i++) {
     m = data.matches[i]
     if (
-      !m ||
+      !onlyKeys_(m, [
+        'id',
+        'sessionId',
+        'court',
+        'teamA',
+        'teamB',
+        'startedAt',
+        'endedAt',
+        'status',
+        'actions',
+        'revision',
+        'planSlotId',
+      ]) ||
       !id_(m.id) ||
       matches[m.id] ||
       !sessions[m.sessionId] ||
@@ -445,19 +567,172 @@ function validateData_(data) {
     for (var j = 0; j < m.actions.length; j++) {
       var a = m.actions[j]
       if (
-        !a ||
+        !onlyKeys_(a, ['id', 'kind', 'side', 'playerId', 'scores', 'synthetic', 'at']) ||
         !id_(a.id) ||
         actions[a.id] ||
         !finite_(a.at) ||
-        ['point', 'undo'].indexOf(a.kind) < 0 ||
+        ['point', 'undo', 'adjust'].indexOf(a.kind) < 0 ||
         (a.kind === 'point' && ['A', 'B'].indexOf(a.side) < 0)
       )
         return 'Invalid scoring action.'
+      if (
+        a.playerId !== undefined &&
+        (a.kind !== 'point' || (a.side === 'A' ? m.teamA : m.teamB).indexOf(a.playerId) < 0)
+      )
+        return 'Invalid player point credit.'
+      if (a.synthetic !== undefined && typeof a.synthetic !== 'boolean')
+        return 'Invalid synthetic flag.'
+      if (a.kind === 'adjust' && !adjustment_(a.scores, m, session))
+        return 'Invalid score adjustment.'
       actions[a.id] = true
     }
-    matches[m.id] = true
+    if (m.endedAt !== undefined && m.endedAt < m.startedAt)
+      return 'A match cannot end before it starts.'
+    if (m.planSlotId !== undefined && !id_(m.planSlotId)) return 'Invalid schedule slot reference.'
+    matches[m.id] = m
+  }
+  for (i = 0; i < data.sessions.length; i++) {
+    s = data.sessions[i]
+    var planned = s.plan ? s.plan.slots : []
+    for (var pi = 0; pi < planned.length; pi++) {
+      var ps = planned[pi],
+        actual = ps.matchId ? matches[ps.matchId] : null
+      if (
+        ps.matchId &&
+        (!actual ||
+          actual.sessionId !== s.id ||
+          actual.court !== ps.court ||
+          actual.teamA.join('|') !== ps.teamA.join('|') ||
+          actual.teamB.join('|') !== ps.teamB.join('|'))
+      )
+        return 'Invalid schedule match reference.'
+    }
+  }
+  for (i = 0; i < data.matches.length; i++) {
+    m = data.matches[i]
+    if (m.planSlotId) {
+      var list = sessions[m.sessionId].plan ? sessions[m.sessionId].plan.slots : []
+      if (
+        !list.some(function (slot) {
+          return slot.id === m.planSlotId && slot.matchId === m.id
+        })
+      )
+        return 'Invalid match schedule link.'
+    }
   }
   return null
+}
+
+function migrateLegacy_(data) {
+  if (!record_(data) || data.version !== 1) return data
+  // JSON cloning preserves own __proto__ keys for rejection instead of invoking setters.
+  var migrated = JSON.parse(JSON.stringify(data))
+  migrated.version = 2
+  if (Array.isArray(migrated.matches))
+    migrated.matches.forEach(function (match) {
+      if (record_(match) && typeof match.reason === 'string') delete match.reason
+    })
+  return migrated
+}
+function onlyKeys_(value, names) {
+  return (
+    record_(value) &&
+    Object.keys(value).every(function (key) {
+      return names.indexOf(key) >= 0
+    })
+  )
+}
+function record_(value) {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+}
+function planning_(p) {
+  if (
+    !onlyKeys_(p, [
+      'basis',
+      'matchCount',
+      'durationMinutes',
+      'matchMinutes',
+      'changeoverMinutes',
+      'weights',
+    ]) ||
+    ['matches', 'duration'].indexOf(p.basis) < 0 ||
+    !integer_(p.matchCount, 1, 200) ||
+    !finite_(p.durationMinutes) ||
+    p.durationMinutes < 1 ||
+    p.durationMinutes > 1440 ||
+    !finite_(p.matchMinutes) ||
+    p.matchMinutes < 1 ||
+    p.matchMinutes > 180 ||
+    !finite_(p.changeoverMinutes) ||
+    p.changeoverMinutes > 60
+  )
+    return false
+  if (p.weights !== undefined) {
+    if (
+      !onlyKeys_(p.weights, [
+        'fairness',
+        'rest',
+        'balance',
+        'variety',
+        'partnership',
+        'contribution',
+      ])
+    )
+      return false
+    var keys = ['fairness', 'rest', 'balance', 'variety', 'partnership', 'contribution']
+    for (var i = 0; i < keys.length; i++)
+      if (!finite_(p.weights[keys[i]]) || p.weights[keys[i]] > 100) return false
+  }
+  return true
+}
+function adjustment_(scores, match, session) {
+  if (!Array.isArray(scores) || !scores.length || scores.length > session.bestOf) return false
+  var winsA = 0,
+    winsB = 0,
+    needed = session.bestOf === 3 ? 2 : 1
+  for (var i = 0; i < scores.length; i++) {
+    var game = scores[i]
+    if (
+      winsA >= needed ||
+      winsB >= needed ||
+      !onlyKeys_(game, ['a', 'b', 'credits']) ||
+      !integer_(game.a, 0, session.cap) ||
+      !integer_(game.b, 0, session.cap)
+    )
+      return false
+    var high = Math.max(game.a, game.b),
+      low = Math.min(game.a, game.b)
+    var complete = high === session.cap || (high >= session.target && high - low >= session.winBy)
+    if (
+      (complete &&
+        (game.a === game.b ||
+          (high > session.target && high < session.cap && high - low !== session.winBy) ||
+          (high === session.cap &&
+            session.cap > session.target &&
+            low < session.cap - session.winBy))) ||
+      (!complete && i < scores.length - 1)
+    )
+      return false
+    if (complete) {
+      if (game.a > game.b) winsA++
+      else winsB++
+    }
+    if (game.credits !== undefined) {
+      if (!record_(game.credits)) return false
+      var creditA = 0,
+        creditB = 0,
+        keys = Object.keys(game.credits)
+      for (var j = 0; j < keys.length; j++) {
+        var count = game.credits[keys[j]]
+        if (!integer_(count, 0, 199)) return false
+        if (match.teamA.indexOf(keys[j]) >= 0) creditA += count
+        else if (match.teamB.indexOf(keys[j]) >= 0) creditB += count
+        else return false
+      }
+      if (creditA > game.a || creditB > game.b) return false
+    }
+  }
+  return true
 }
 
 function json_(value) {

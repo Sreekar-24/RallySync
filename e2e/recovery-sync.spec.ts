@@ -1,3 +1,4 @@
+import { seedRealDemo } from './helpers'
 import { expect, test } from '@playwright/test'
 import { createDemo } from '../src/lib/demo'
 
@@ -5,7 +6,7 @@ test('exports, resets, and restores a complete history without accepting malform
   page,
 }, testInfo) => {
   await page.goto('./')
-  await page.getByRole('button', { name: 'Explore a demo' }).click()
+  await seedRealDemo(page)
   await page.getByRole('button', { name: 'Settings', exact: true }).click()
   await page.getByLabel('Choose RallySync backup').setInputFiles({
     name: 'broken.json',
@@ -66,7 +67,7 @@ test('uploads local history to a simulated Sheets endpoint and protects conflict
     })
   })
   await page.goto('./')
-  await page.getByRole('button', { name: 'Explore a demo' }).click()
+  await seedRealDemo(page)
   await page.getByRole('button', { name: 'Settings', exact: true }).click()
   await page
     .getByLabel('Apps Script web-app URL', { exact: true })

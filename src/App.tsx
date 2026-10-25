@@ -16,6 +16,7 @@ import {
   CircleHelp,
   Clock3,
   Ellipsis,
+  FlaskConical,
   History,
   LayoutDashboard,
   Leaf,
@@ -33,6 +34,7 @@ import { useRally } from './store'
 import { Modal, Shuttle } from './components'
 import PlayPage, { FinalScoreEntry } from './features/PlayPage'
 import './features/collection.css'
+import DataMaintenance from './features/DataMaintenance'
 
 const PeoplePage = lazy(() => import('./features/PeoplePage'))
 const HistoryPage = lazy(() => import('./features/HistoryPage'))
@@ -60,8 +62,19 @@ interface InstallPrompt extends Event {
 }
 
 export default function App() {
-  const { data, ready, readOnly, persistStatus, storageError, toast, sync, syncBusy, syncError } =
-    useRally()
+  const {
+    data,
+    ready,
+    readOnly,
+    persistStatus,
+    storageError,
+    toast,
+    sync,
+    syncBusy,
+    syncError,
+    isDemo,
+    exitDemo,
+  } = useRally()
   const [page, setPage] = useState<Page>(hashPage)
   const [more, setMore] = useState(false)
   const [installHelp, setInstallHelp] = useState(false)
@@ -111,23 +124,25 @@ export default function App() {
       setInstallPrompt(null)
     } else setInstallHelp(true)
   }
-  const status = !online
-    ? 'Offline · saved locally'
-    : persistStatus === 'error'
-      ? 'Backup needed'
-      : syncBusy
-        ? 'Syncing…'
-        : syncError
-          ? 'Sync needs attention'
-          : sync.endpoint
-            ? !sync.lastSyncAt
-              ? 'Connection not checked'
-              : sync.dirty
-                ? 'Changes waiting to sync'
-                : 'All changes synced'
-            : persistStatus === 'saving'
-              ? 'Saving on device…'
-              : 'Saved on this device'
+  const status = isDemo
+    ? 'Demo · not saved'
+    : !online
+      ? 'Offline · saved locally'
+      : persistStatus === 'error'
+        ? 'Backup needed'
+        : syncBusy
+          ? 'Syncing…'
+          : syncError
+            ? 'Sync needs attention'
+            : sync.endpoint
+              ? !sync.lastSyncAt
+                ? 'Connection not checked'
+                : sync.dirty
+                  ? 'Changes waiting to sync'
+                  : 'All changes synced'
+              : persistStatus === 'saving'
+                ? 'Saving on device…'
+                : 'Saved on this device'
 
   if (!ready)
     return (
@@ -264,6 +279,24 @@ export default function App() {
               </button>
             </div>
           </header>
+          {isDemo && (
+            <div className="demo-banner" role="status">
+              <FlaskConical size={20} />
+              <p>
+                <strong>Demo sandbox.</strong> Sample scores stay here. Your saved history and
+                shared sheet are untouched.
+              </p>
+              <button
+                className="button"
+                onClick={() => {
+                  exitDemo()
+                  setCorrection(null)
+                }}
+              >
+                Exit demo
+              </button>
+            </div>
+          )}
           {readOnly && !storageError && (
             <div className="app-notice">
               <ShieldCheck size={16} />
@@ -313,8 +346,23 @@ export default function App() {
                 <HistoryPage onCorrectMatch={setCorrection} />
               ) : page === 'rules' ? (
                 <RulesPage />
+              ) : isDemo ? (
+                <div className="panel demo-settings-empty">
+                  <FlaskConical size={36} />
+                  <h1>You’re in the practice clubhouse.</h1>
+                  <p>
+                    Explore scoring, schedules, and insights with sample data. Exit demo to manage
+                    your real backups, storage, and Sheets connection.
+                  </p>
+                  <button className="button primary" onClick={exitDemo}>
+                    Exit demo
+                  </button>
+                </div>
               ) : (
-                <SettingsPage />
+                <>
+                  <SettingsPage />
+                  <DataMaintenance />
+                </>
               )}
             </Suspense>
             <footer className="page-footer">

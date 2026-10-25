@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import {
   attendanceSummary,
+  adjustMatchScores,
+  canUndoScore,
+  getScoreEntries,
   buildFinalResult,
   getStandings,
   playerStats,
@@ -78,6 +81,11 @@ describe('badminton scoring', () => {
       gamesB: 0,
       games: [],
       complete: false,
+      winner: undefined,
+      credits: {},
+      allCredits: {},
+      attributedPoints: 0,
+      totalPoints: 0,
     })
     expect(m.actions).toEqual([])
   })
@@ -270,15 +278,9 @@ describe('match scheduling', () => {
 
 describe('final result entry and corrections', () => {
   it('rejects impossible cap scores rather than silently saving an earlier winning score', () => {
-    expect(() => buildFinalResult(match(), session(), [{ a: 30, b: 0 }])).toThrow(
-      'Check game scores',
-    )
-    expect(() => buildFinalResult(match(), session(), [{ a: 30, b: 27 }])).toThrow(
-      'Check game scores',
-    )
-    expect(() => buildFinalResult(match(), session(), [{ a: 22, b: 0 }])).toThrow(
-      'Check game scores',
-    )
+    expect(() => buildFinalResult(match(), session(), [{ a: 30, b: 0 }])).toThrow('ended earlier')
+    expect(() => buildFinalResult(match(), session(), [{ a: 30, b: 27 }])).toThrow('ended earlier')
+    expect(() => buildFinalResult(match(), session(), [{ a: 22, b: 0 }])).toThrow('ended earlier')
   })
 
   it('accepts both valid cap results exactly as entered', () => {
@@ -298,7 +300,7 @@ describe('final result entry and corrections', () => {
       { a: NaN, b: 0 },
       { a: Infinity, b: 0 },
     ]) {
-      expect(() => buildFinalResult(match(), session(), [game])).toThrow('Check game scores')
+      expect(() => buildFinalResult(match(), session(), [game])).toThrow()
     }
     expect(() => buildFinalResult(match(), session(), [])).toThrow('Enter at least one')
   })
@@ -336,7 +338,15 @@ describe('final result entry and corrections', () => {
     const before = JSON.stringify(original)
     const changed = buildFinalResult(original, s, [{ a: 18, b: 21 }], start + 20 * 60000)
     expect(changed.actions.slice(0, original.actions.length)).toEqual(original.actions)
-    expect(changed.actions.filter((action) => action.kind === 'undo')).toHaveLength(21)
+    expect(changed.actions.filter((action) => action.kind === 'adjust')).toHaveLength(1)
+    const undone = {
+      ...changed,
+      actions: [
+        ...changed.actions,
+        { id: 'undo-correction', kind: 'undo' as const, at: start + 99999 },
+      ],
+    }
+    expect(scoreMatch(undone, s)).toMatchObject({ a: 21, b: 0, winner: 'A' })
     expect(scoreMatch(changed, s)).toMatchObject({ a: 18, b: 21, winner: 'B' })
     expect(changed.endedAt).toBe(original.endedAt)
     expect(changed.revision).toBe(8)
@@ -423,6 +433,196 @@ describe('verified results and standings', () => {
   it('returns a fresh empty data structure', () => {
     const first = initialData()
     first.players.push({ id: 'a', name: 'A', level: 3, createdAt: start })
-    expect(initialData()).toEqual({ version: 1, players: [], sessions: [], matches: [] })
+    expect(initialData()).toEqual({ version: 2, players: [], sessions: [], matches: [] })
   })
+})
+
+describe('credited doubles scoring and direct edits', () => {
+  const credited = (side: Side, playerId?: string, index = 0) => ({
+    id: `credit-${index}`,
+    kind: 'point' as const,
+    side,
+    playerId,
+    at: start + index,
+  })
+
+  it('adds a player point once to their side and records unassigned points separately', () => {
+    const m = match([], {
+      actions: [
+        credited('A', 'a', 0),
+        credited('A', 'b', 1),
+        credited('A', undefined, 2),
+        credited('B', 'c', 3),
+      ],
+    })
+    expect(scoreMatch(m, session())).toMatchObject({
+      a: 3,
+      b: 1,
+      credits: { a: 1, b: 1, c: 1 },
+      allCredits: { a: 1, b: 1, c: 1 },
+      attributedPoints: 3,
+      totalPoints: 4,
+    })
+    expect(getScoreEntries(m, session())[0].credits).toEqual({ a: 1, b: 1, c: 1 })
+  })
+
+  it('never credits the opposing player or treats a synthetic rally as observed contribution', () => {
+    const m = match([], {
+      actions: [credited('A', 'c', 0), { ...credited('A', 'a', 1), synthetic: true }],
+    })
+    expect(scoreMatch(m, session())).toMatchObject({
+      a: 2,
+      b: 0,
+      attributedPoints: 0,
+      allCredits: {},
+    })
+  })
+
+  it('corrects a live total while preserving existing attribution and keeping the result provisional', () => {
+    const m = match([], { actions: [credited('A', 'a', 0), credited('B', 'c', 1)] })
+    const adjusted = adjustMatchScores(m, session(), [{ a: 21, b: 19 }])
+    expect(adjusted.status).toBe('playing')
+    expect(scoreMatch(adjusted, session())).toMatchObject({
+      complete: true,
+      winner: 'A',
+      allCredits: { a: 1, c: 1 },
+      totalPoints: 40,
+    })
+    expect(getStandings(data(session(), [adjusted]))).toEqual([])
+  })
+
+  it('returns from provisional finish to live scoring when the total is corrected below a win', () => {
+    const s = session()
+    const provisional = adjustMatchScores(match(), s, [{ a: 21, b: 19 }])
+    const live = adjustMatchScores(provisional, s, [{ a: 20, b: 19 }])
+    expect(scoreMatch(live, s)).toMatchObject({ complete: false, a: 20, b: 19 })
+    expect(live.status).toBe('playing')
+    live.actions.push(credited('B', 'c', 30))
+    expect(scoreMatch(live, s)).toMatchObject({ a: 20, b: 20, complete: false, credits: { c: 1 } })
+  })
+
+  it('undoes one entire edit and restores the prior score and credit allocation', () => {
+    const m = match([], { actions: [credited('A', 'a', 0), credited('B', 'c', 1)] })
+    const adjusted = adjustMatchScores(m, session(), [
+      { a: 10, b: 8, credits: { a: 5, b: 3, c: 4, d: 2 } },
+    ])
+    adjusted.actions.push({ id: 'undo-edit', kind: 'undo', at: start + 5000 })
+    expect(scoreMatch(adjusted, session())).toEqual(scoreMatch(m, session()))
+    adjusted.actions.push({ id: 'undo-point', kind: 'undo', at: start + 6000 })
+    expect(scoreMatch(adjusted, session())).toMatchObject({ a: 1, b: 0, credits: { a: 1 } })
+  })
+
+  it('rejects point allocation that exceeds totals, belongs elsewhere, or is not a whole number', () => {
+    for (const credits of [{ a: 11 }, { a: -1 }, { a: 1.5 }, { e: 1 }, { a: NaN }] as Record<
+      string,
+      number
+    >[])
+      expect(() => adjustMatchScores(match(), session(), [{ a: 10, b: 8, credits }])).toThrow()
+  })
+
+  it('requires explicit reallocation instead of silently deleting a credited point', () => {
+    const m = match([], { actions: [credited('A', 'a', 0), credited('A', 'a', 1)] })
+    expect(() => adjustMatchScores(m, session(), [{ a: 1, b: 0 }])).toThrow('credits exceed')
+    expect(
+      scoreMatch(adjustMatchScores(m, session(), [{ a: 1, b: 0, credits: { a: 1 } }]), session()),
+    ).toMatchObject({ a: 1, credits: { a: 1 } })
+    expect(
+      scoreMatch(adjustMatchScores(m, session(), [{ a: 1, b: 0, credits: {} }]), session()),
+    ).toMatchObject({ a: 1, attributedPoints: 0 })
+  })
+
+  it('maintains per-game and all-match credits through best-of-three transitions', () => {
+    const s = session({ target: 3, cap: 5, bestOf: 3 })
+    const m = match([], {
+      actions: [
+        credited('A', 'a', 0),
+        credited('A', 'b', 1),
+        credited('A', 'a', 2),
+        credited('B', 'c', 3),
+      ],
+    })
+    expect(scoreMatch(m, s)).toMatchObject({
+      a: 0,
+      b: 1,
+      gamesA: 1,
+      credits: { c: 1 },
+      allCredits: { a: 2, b: 1, c: 1 },
+      totalPoints: 4,
+    })
+    m.actions.push(
+      { id: 'undo-game2point', kind: 'undo', at: start + 5 },
+      { id: 'undo-gamepoint', kind: 'undo', at: start + 6 },
+    )
+    expect(scoreMatch(m, s)).toMatchObject({
+      a: 2,
+      b: 0,
+      gamesA: 0,
+      credits: { a: 1, b: 1 },
+      allCredits: { a: 1, b: 1 },
+    })
+  })
+
+  it('allows correcting all games together and counts the winner only after explicit finalization', () => {
+    const s = session({ bestOf: 3 })
+    const provisional = adjustMatchScores(match(), s, [
+      { a: 21, b: 10, credits: { a: 12 } },
+      { a: 19, b: 21, credits: { c: 8 } },
+      { a: 18, b: 21, credits: { d: 11 } },
+    ])
+    expect(getStandings(data(s, [provisional]))).toHaveLength(0)
+    const final = buildFinalResult(provisional, s, getScoreEntries(provisional, s))
+    expect(scoreMatch(final, s)).toMatchObject({
+      winner: 'B',
+      gamesA: 1,
+      gamesB: 2,
+      allCredits: { a: 12, c: 8, d: 11 },
+    })
+    expect(playerStats(data(s, [final]), 'c')).toMatchObject({ wins: 1, played: 1 })
+  })
+
+  it('ignores retries of an adjustment and undo so a correction is applied only once', () => {
+    const s = session()
+    const m = adjustMatchScores(match(['A']), s, [{ a: 8, b: 6 }])
+    m.actions.push(m.actions.at(-1)!)
+    const undo = { id: 'undo-retry', kind: 'undo' as const, at: start + 3 }
+    m.actions.push(undo, undo)
+    expect(scoreMatch(m, s)).toMatchObject({ a: 1, b: 0 })
+  })
+
+  it('rejects skipped/incomplete games, games after a clincher, and impossible cap ties', () => {
+    const s = session({ bestOf: 3 })
+    expect(() =>
+      adjustMatchScores(match(), s, [
+        { a: 10, b: 8 },
+        { a: 21, b: 8 },
+      ]),
+    ).toThrow('Finish a game')
+    expect(() =>
+      adjustMatchScores(match(), s, [
+        { a: 21, b: 8 },
+        { a: 21, b: 8 },
+        { a: 0, b: 0 },
+      ]),
+    ).toThrow('after the match')
+    expect(() => adjustMatchScores(match(), s, [{ a: 30, b: 30 }])).toThrow('tied at')
+  })
+
+  it('excludes future arrivals and departed players from immediate recommendations', () => {
+    const s = session({
+      format: 'singles',
+      courtCount: 1,
+      availablePlayerIds: ['a', 'b', 'c', 'd'],
+      availability: { a: { from: start + 60000 }, b: { until: start - 1 } },
+    })
+    const suggestion = suggestMatch(data(s), s, 1, start)!
+    expect([...suggestion.teamA, ...suggestion.teamB].sort()).toEqual(['c', 'd'])
+  })
+})
+
+it('keeps undo available after a direct correction to love-all', () => {
+  const s = session()
+  const m = adjustMatchScores(match(['A', 'A']), s, [{ a: 0, b: 0 }])
+  expect(canUndoScore(m, s)).toBe(true)
+  m.actions.push({ id: 'undo-zero', kind: 'undo', at: start + 50 })
+  expect(scoreMatch(m, s)).toMatchObject({ a: 2, b: 0 })
 })

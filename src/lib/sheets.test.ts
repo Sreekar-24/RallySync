@@ -59,6 +59,16 @@ describe('Sheets transport', () => {
     expect(options.headers).toBeUndefined()
   })
 
+  it('accepts legacy and v2 snapshots while rejecting unsupported versions', async () => {
+    for (const version of [1, 2]) {
+      vi.stubGlobal(
+        'fetch',
+        vi.fn().mockResolvedValue(json({ ...snapshot, data: { ...initialData(), version } })),
+      )
+      expect((await pullSheet(endpoint)).data?.version).toBe(version)
+    }
+  })
+
   it('accepts an empty shared store', async () => {
     vi.stubGlobal(
       'fetch',
@@ -105,7 +115,7 @@ describe('Sheets transport', () => {
     { ...snapshot, revision: 1.5 },
     { ...snapshot, updatedAt: 'yesterday' },
     { ...snapshot, data: undefined },
-    { ...snapshot, data: { version: 2, players: [], sessions: [], matches: [] } },
+    { ...snapshot, data: { version: 3, players: [], sessions: [], matches: [] } },
     { ...snapshot, mutationId: 42 },
   ])('rejects invalid response metadata or unsupported snapshots', async (value) => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(json(value)))

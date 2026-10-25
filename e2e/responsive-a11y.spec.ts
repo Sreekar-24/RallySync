@@ -61,3 +61,39 @@ test('passes automated accessibility checks on primary screens and live scoring'
   )
   expect(violations).toEqual([])
 })
+
+test('keeps planning, score correction, and comparison views accessible', async ({ page }) => {
+  test.setTimeout(90000)
+  await page.emulateMedia({ reducedMotion: 'reduce' })
+  await page.goto('./')
+  await page.getByRole('button', { name: 'Explore a demo', exact: true }).click()
+  const violations: unknown[] = []
+  const check = async (view: string) => {
+    const result = await new AxeBuilder({ page })
+      .withTags(['wcag2a', 'wcag2aa', 'wcag21aa'])
+      .analyze()
+    violations.push(
+      ...result.violations.map((v) => ({
+        view,
+        id: v.id,
+        nodes: v.nodes.map((n) => ({ target: n.target, summary: n.failureSummary })),
+      })),
+    )
+  }
+  await page.getByRole('button', { name: /Full schedule/ }).click()
+  await check('Full schedule')
+  await page.getByRole('button', { name: 'Plan settings', exact: true }).click()
+  await check('Planning form')
+  await page.getByRole('button', { name: 'Close dialog', exact: true }).click()
+  await page.getByRole('button', { name: 'Start match', exact: true }).first().click()
+  await page.getByRole('button', { name: 'Edit all scores', exact: true }).click()
+  await check('Score editor')
+  await page.getByRole('button', { name: 'Close dialog', exact: true }).click()
+  await page.getByRole('button', { name: 'Rankings', exact: true }).click()
+  const group = page.getByRole('group', { name: 'Results view' })
+  for (const view of ['Standings', 'Partnerships', 'Opponents', 'Participation']) {
+    await group.getByRole('button', { name: view, exact: true }).click()
+    await check(view)
+  }
+  expect(violations).toEqual([])
+})

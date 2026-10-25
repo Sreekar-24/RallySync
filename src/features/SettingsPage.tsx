@@ -817,7 +817,7 @@ export default function SettingsPage() {
         </Modal>
       )}
       <p className="settings-footer">
-        Less admin. More badminton. <span>RallySync · v0.1</span>
+        Less admin. More badminton. <span>RallySync · v0.2</span>
       </p>
     </div>
   )

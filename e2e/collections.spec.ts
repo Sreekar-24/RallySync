@@ -1,3 +1,4 @@
+import { seedRealDemo } from './helpers'
 import { expect, test } from '@playwright/test'
 
 test.beforeEach(async ({ page }) => {
@@ -44,7 +45,7 @@ test('adds, edits, validates, and removes unused player profiles', async ({ page
 
 test('shows real demo standings and scoped match history', async ({ page }) => {
   await page.goto('./')
-  await page.getByRole('button', { name: 'Explore a demo', exact: true }).click()
+  await seedRealDemo(page)
   await page.getByRole('button', { name: 'Rankings', exact: true }).click()
   await expect(page.locator('.rankings-table tbody tr')).toHaveCount(4)
   const alex = page.locator('.rankings-table tbody tr').filter({ hasText: 'Alex Morgan' })
@@ -67,7 +68,9 @@ test('shows real demo standings and scoped match history', async ({ page }) => {
   await page.getByLabel('Filter sessions').selectOption('completed')
   await expect(page.getByRole('heading', { name: 'No sessions in this view.' })).toBeVisible()
   await page.getByLabel('Filter sessions').selectOption('active')
-  await expect(page.getByRole('button', { name: /The weekend rally/ })).toBeVisible()
+  await expect(
+    page.locator('.history-session-toggle').filter({ hasText: 'The weekend rally' }),
+  ).toBeVisible()
 
   await page.getByRole('button', { name: 'Players', exact: true }).click()
   await page.getByRole('button', { name: 'Remove Alex Morgan', exact: true }).click()
@@ -79,7 +82,7 @@ test('shows real demo standings and scoped match history', async ({ page }) => {
 test('keeps collection screens within a mobile viewport', async ({ page }) => {
   await page.setViewportSize({ width: 360, height: 780 })
   await page.goto('./')
-  await page.getByRole('button', { name: 'Explore a demo', exact: true }).click()
+  await seedRealDemo(page)
   for (const name of ['Players', 'History', 'Rankings']) {
     if (name === 'History') await page.getByRole('button', { name: 'More navigation' }).click()
     await page.getByRole('button', { name, exact: true }).click()
@@ -93,14 +96,14 @@ test('keeps collection screens within a mobile viewport', async ({ page }) => {
 
 test('correcting a historical result updates the leaderboard', async ({ page }) => {
   await page.goto('./')
-  await page.getByRole('button', { name: 'Explore a demo', exact: true }).click()
+  await seedRealDemo(page)
   await page.getByRole('button', { name: 'History', exact: true }).click()
   await page.getByRole('button', { name: /The weekend rally/ }).click()
   await page.getByRole('button', { name: 'Correct result', exact: true }).click()
   const dialog = page.getByRole('dialog')
   await dialog.getByLabel('Game 1 side A', { exact: true }).fill('18')
   await dialog.getByLabel('Game 1 side B', { exact: true }).fill('21')
-  await dialog.getByRole('button', { name: 'Save final result', exact: true }).click()
+  await dialog.getByRole('button', { name: 'Save corrected result', exact: true }).click()
   await expect(page.locator('.history-match')).toContainText('18–21')
   await page.getByRole('button', { name: 'Rankings', exact: true }).click()
   const alex = page.locator('.rankings-table tbody tr').filter({ hasText: 'Alex Morgan' })

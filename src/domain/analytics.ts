@@ -109,11 +109,23 @@ function availabilityIntervals(
   now: number,
 ): [number, number][] {
   const end = Math.max(session.startedAt, Math.min(now, session.endedAt ?? now))
-  const events = (session.attendance ?? [])
-    .filter((a) => a.playerId === playerId && a.at <= end)
+  const personalEvents = (session.attendance ?? []).filter((a) => a.playerId === playerId)
+  const events = personalEvents
+    .filter((a) => a.at <= end)
     .slice()
     .sort((a, b) => a.at - b.at)
-  if (!events.length) return [[session.startedAt, end]]
+  const window = session.availability?.[playerId]
+  const clip = (intervals: [number, number][]) =>
+    intervals
+      .map(
+        ([a, b]) =>
+          [Math.max(a, window?.from ?? session.startedAt), Math.min(b, window?.until ?? end)] as [
+            number,
+            number,
+          ],
+      )
+      .filter(([a, b]) => b > a)
+  if (!events.length) return personalEvents.length ? [] : clip([[session.startedAt, end]])
   const intervals: [number, number][] = []
   let start = session.startedAt
   let available = false
@@ -124,7 +136,7 @@ function availabilityIntervals(
     start = at
   }
   if (available && end > start) intervals.push([start, end])
-  return intervals
+  return clip(intervals)
 }
 
 function participation(

@@ -253,4 +253,33 @@ describe('scoped analytics', () => {
     expect(result.participation).toEqual([])
     expect(JSON.stringify(data)).toBe(before)
   })
+
+  it('clips reported availability to arrival/departure windows and excludes breaks', () => {
+    const s = session('doubles', {
+      availability: { a: { from: start + 10 * 60000, until: start + 20 * 60000 } },
+      attendance: [
+        { playerId: 'a', at: start, available: true },
+        { playerId: 'a', at: start + 10 * 60000, available: false },
+        { playerId: 'a', at: start + 15 * 60000, available: true },
+      ],
+    })
+    const result = getAnalytics(fixture([], [s]), {}, start + 30 * 60000)
+    expect(result.participation.find((p) => p.playerId === 'a')).toMatchObject({
+      availableMinutes: 5,
+      waitingMinutes: 5,
+      longestWaitMinutes: 5,
+    })
+  })
+
+  it('does not report a future arrival as already waiting', () => {
+    const s = session('doubles', {
+      attendance: [{ playerId: 'a', at: start + 60 * 60000, available: true }],
+    })
+    const result = getAnalytics(fixture([], [s]), {}, start + 30 * 60000)
+    expect(result.participation.find((p) => p.playerId === 'a')).toMatchObject({
+      availableMinutes: 0,
+      waitingMinutes: 0,
+      longestWaitMinutes: 0,
+    })
+  })
 })

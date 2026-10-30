@@ -227,7 +227,7 @@
   color: #c9d5cf;
   border-radius: 8px;
 }
-.rules-explainer-content > .rules-demo-note {
+.rules-explainer-controls > .rules-demo-note {
   font-size: 10px;
   line-height: 1.6;
   color: #9cb0a8;
@@ -812,5 +812,224 @@
     animation: none !important;
     transition: none !important;
     scroll-behavior: auto !important;
+  }
+}
+
+/* Player identity stays fixed while the service role moves between players. */
+.rules-serving-side {
+  display: block;
+  margin-top: 5px;
+  color: #e1eddf;
+  font-size: 11px;
+}
+.rules-service-answer {
+  min-height: 111px;
+}
+.rules-side-out {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  margin-top: 9px;
+  padding: 10px 12px;
+  border: 1px solid #ffffff42;
+  border-radius: 8px;
+  background: transparent;
+  color: #e0e9dc;
+  font-size: 11px;
+  font-weight: 650;
+}
+.rules-side-out:hover:not(:disabled),
+.rules-example-controls button:hover {
+  background: #ffffff12;
+}
+.rules-guided-example {
+  margin-top: 17px;
+  border-top: 1px solid #ffffff24;
+  color: #d0ddcf;
+  max-width: 350px;
+  font-size: 11px;
+}
+.rules-guided-example summary {
+  min-height: 44px;
+  padding: 15px 0 12px;
+  cursor: pointer;
+  line-height: 1.5;
+}
+.rules-guided-example summary:focus-visible {
+  outline: 3px solid #d9f96c;
+  outline-offset: 3px;
+}
+.rules-example-controls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.rules-example-controls button {
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 10px;
+  color: #e6f0df;
+  border: 1px solid #ffffff42;
+  border-radius: 7px;
+  background: transparent;
+  font-size: 11px;
+}
+.rules-example-controls > span {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+}
+.rules-guided-example p {
+  font-size: 11px;
+  line-height: 1.7;
+  color: #b9ccbd;
+  margin: 12px 0 0;
+}
+.rules-match-score {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  margin: 18px 0 -8px;
+  color: #afc2b6;
+  font-size: 11px;
+}
+.rules-match-score > span:not(:nth-child(2)) {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  padding: 5px 9px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+}
+.rules-match-score strong {
+  font-size: 21px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 650;
+}
+.rules-match-score .is-serving {
+  color: #d9f96c;
+  border-color: #d9f96c44;
+  background: #d9f96c09;
+}
+.rules-server-caption {
+  fill: #d9f96c;
+  font:
+    700 9px system-ui,
+    sans-serif;
+  letter-spacing: 1px;
+}
+.rules-own-court-label {
+  fill: #d2e2cc;
+  font:
+    600 9px system-ui,
+    sans-serif;
+}
+.rules-key-receiver {
+  background: #a6b8ad;
+  border: 2px solid #fff;
+}
+.rules-boundary-toggle {
+  display: flex;
+  justify-content: center;
+  gap: 5px;
+  margin-top: 24px;
+}
+.rules-boundary-toggle button {
+  min-height: 44px;
+  padding: 10px 14px;
+  border: 1px solid #ffffff35;
+  border-radius: 8px;
+  color: #cfdece;
+  background: transparent;
+  font-size: 11px;
+}
+.rules-boundary-toggle button[aria-pressed='true'] {
+  color: #e5f6cd;
+  border-color: #d9f96c88;
+  background: #d9f96c10;
+}
+.rules-boundary-note {
+  color: #c4d4c4;
+  text-align: center;
+  font-size: 11px;
+  line-height: 1.7;
+  min-height: 37px;
+  margin-top: 12px;
+}
+@media (max-width: 760px) {
+  .rules-guided-example {
+    max-width: none;
+  }
+  .rules-service-answer {
+    min-height: 94px;
+  }
+  .rules-court-key {
+    gap: 12px;
+  }
+}
+@media (max-width: 360px) {
+  .rules-explainer-content {
+    padding: 21px 17px;
+  }
+  .rules-next {
+    gap: 8px;
+    padding: 11px;
+    font-size: 10px;
+  }
+}
+/* The DOM and visual order agree: introduction, court, then rally controls. */
+.rules-explainer {
+  grid-template-areas: 'intro court' 'controls court';
+  grid-template-rows: auto 1fr;
+}
+.rules-explainer-content {
+  grid-area: intro;
+  padding-bottom: 0;
+}
+.rules-explainer-controls {
+  grid-area: controls;
+  padding: 0 32px 32px;
+}
+.rules-court-wrap {
+  grid-area: court;
+}
+.rules-page .rules-side-out,
+.rules-page .rules-example-controls button,
+.rules-page .rules-boundary-toggle button {
+  font-size: 11px;
+}
+@media (max-width: 1100px) {
+  .rules-explainer-controls {
+    padding: 0 27px 27px;
+  }
+}
+@media (max-width: 760px) {
+  .rules-explainer {
+    grid-template-areas: 'intro' 'court' 'controls';
+    grid-template-rows: auto;
+  }
+  .rules-explainer-controls {
+    padding: 23px 27px 27px;
+  }
+  .rules-court-wrap {
+    border-bottom: 1px solid #ffffff12;
+  }
+  .rules-player-letter {
+    font-size: 14px;
+  }
+}
+@media (max-width: 480px) {
+  .rules-explainer-controls {
+    padding: 23px 24px 24px;
+  }
+}
+@media (max-width: 360px) {
+  .rules-explainer-controls {
+    padding: 21px 17px;
   }
 }

@@ -1,0 +1,337 @@
+.service-panel {
+  --court-ink: var(--theme-ink, #233c35);
+  --court-muted: var(--theme-muted, #5b7064);
+  --court-surface: var(--theme-surface, #fff);
+  --court-line: var(--theme-line, #d7e2d8);
+  border: 1px solid var(--court-line);
+  border-radius: 13px;
+  background: var(--court-surface);
+  overflow: hidden;
+  margin-bottom: 16px;
+  color: var(--court-ink);
+}
+.service-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  padding: 13px 15px 10px;
+}
+.service-heading > div:first-child {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.service-eyebrow {
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 1.2px;
+  color: var(--court-muted);
+}
+.service-status {
+  font-size: 13px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.service-heading-actions {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+.service-heading-actions .text-button {
+  min-height: 44px;
+  white-space: normal;
+  font-size: 11px;
+  text-align: right;
+}
+.service-heading-actions .icon-button {
+  width: 44px;
+  min-height: 44px;
+}
+.position-court {
+  height: 194px;
+  position: relative;
+  margin: 0 11px;
+  background: var(--theme-raised, #f2f6ef);
+  border: 1px solid var(--court-line);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.position-court-lines {
+  position: absolute;
+  inset: 10px 6%;
+  border: 1px solid var(--court-line);
+  border-radius: 2px;
+  background: linear-gradient(
+    to right,
+    transparent calc(50% - 0.5px),
+    var(--court-line) calc(50% - 0.5px),
+    var(--court-line) calc(50% + 0.5px),
+    transparent calc(50% + 0.5px)
+  );
+}
+.position-court-lines::before,
+.position-court-lines::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: var(--court-line);
+}
+.position-court-lines::before {
+  top: 34%;
+}
+.position-court-lines::after {
+  bottom: 34%;
+}
+.position-net {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  right: 0;
+  border-top: 2px dashed var(--court-muted);
+  color: var(--court-muted);
+  text-align: center;
+  font-size: 8px;
+  letter-spacing: 2px;
+  line-height: 1;
+  pointer-events: none;
+}
+.service-flight {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  overflow: visible;
+}
+.service-flight path {
+  stroke: var(--court-muted);
+  stroke-width: 0.55;
+  stroke-dasharray: 1.6 1.8;
+  fill: none;
+  animation: service-travel 3s linear infinite;
+}
+.service-player {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  width: 39%;
+  min-height: 67px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 6px 8px;
+  border-radius: 9px;
+  border: 1px solid var(--court-line);
+  background: var(--court-surface);
+  color: var(--court-ink);
+  box-shadow: 0 2px 5px #142a3008;
+  transition:
+    left 0.28s ease,
+    top 0.28s ease,
+    background 0.2s,
+    box-shadow 0.2s;
+  z-index: 1;
+  gap: 3px;
+}
+.service-player:disabled {
+  opacity: 1;
+}
+/* Keep this structural transform in the same layer as the disabled-button reset.
+   Important declarations reverse CSS layer precedence. */
+@layer base {
+  .service-player:disabled {
+    transform: translate(-50%, -50%) !important;
+  }
+}
+.service-player:not(:disabled):hover {
+  box-shadow: 0 0 0 2px var(--court-muted);
+}
+.service-player strong {
+  font-size: 12px;
+  width: 100%;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  overflow: hidden;
+  text-align: center;
+}
+.service-seat {
+  font-size: 9px;
+  color: var(--court-muted);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.serve-choice-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 1.5px solid currentColor;
+}
+.service-player.is-serving {
+  background: var(--theme-accent, #d9f96c);
+  color: var(--theme-accent-ink, #243a19);
+  border-color: var(--theme-accent-ink, #516c2a);
+  box-shadow:
+    0 0 0 2px var(--court-surface),
+    0 0 0 3px var(--theme-accent-ink, #6a842f);
+}
+.service-player.is-serving .service-seat {
+  color: inherit;
+}
+.service-player.is-serving .serve-choice-dot {
+  background: currentColor;
+}
+.service-player.is-receiving {
+  border-style: dashed;
+  border-color: var(--court-muted);
+}
+.service-player-role {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  color: var(--court-muted);
+  font-size: 9px;
+}
+.service-player.is-serving .service-player-role {
+  color: inherit;
+  font-weight: 800;
+}
+.service-caption {
+  font-size: 11px;
+  line-height: 1.7;
+  padding: 10px 15px 12px;
+  color: var(--court-muted);
+}
+.service-interval-note {
+  margin: 0 12px 12px;
+  padding: 8px 10px;
+  border-radius: 7px;
+  background: var(--theme-accent-soft, #eaf4dc);
+  color: var(--court-ink);
+  font-size: 11px;
+  line-height: 1.7;
+}
+.service-needs-check .service-status {
+  color: var(--theme-danger, #9a492b);
+}
+.service-setup-tools {
+  padding: 10px 12px 12px;
+}
+.service-setup-tools > p {
+  font-size: 11px;
+  line-height: 1.7;
+  color: var(--court-muted);
+  margin-bottom: 8px;
+}
+.service-position-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.service-position-actions .button {
+  min-height: 44px;
+  font-size: 11px;
+  padding: 8px 10px;
+}
+.service-position-actions .primary {
+  margin-left: auto;
+}
+.service-position-actions .icon-button {
+  min-height: 44px;
+  width: 44px;
+}
+.service-explanation {
+  border-top: 1px solid var(--court-line);
+  padding: 12px 15px;
+  font-size: 11px;
+  line-height: 1.8;
+  color: var(--court-muted);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.service-error {
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--theme-danger, #9a492b);
+  padding: 10px 15px;
+}
+.court-service-indicator {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: -4px 0 14px;
+  padding: 9px 11px;
+  border: 1px solid var(--theme-line, #dee6d2);
+  border-radius: 7px;
+  color: var(--theme-ink, #3e5e2b);
+  background: var(--theme-raised, #f4f8ed);
+  font-size: 11px;
+  line-height: 1.6;
+}
+.court-person.is-serving .avatar {
+  box-shadow: 0 0 0 2px var(--theme-accent-ink, #74983c);
+}
+.court-service-indicator > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+@keyframes service-travel {
+  to {
+    stroke-dashoffset: -10;
+  }
+}
+@media (max-width: 420px) {
+  .service-heading {
+    padding: 11px 10px 9px;
+  }
+  .service-heading-actions .icon-button {
+    width: 44px;
+  }
+  .service-heading-actions .text-button {
+    max-width: 86px;
+    font-size: 10px;
+  }
+  .service-status {
+    font-size: 12px;
+  }
+  .position-court {
+    height: 181px;
+    margin: 0 8px;
+  }
+  .service-player {
+    width: 42%;
+    padding: 6px;
+    min-height: 64px;
+  }
+  .service-player strong {
+    font-size: 11px;
+  }
+  .service-caption {
+    font-size: 10px;
+    padding: 10px;
+  }
+  .service-position-actions {
+    gap: 5px;
+  }
+  .service-position-actions .button {
+    font-size: 10px;
+    padding: 7px 8px;
+  }
+  .service-position-actions .primary {
+    flex: 1;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .service-player {
+    transition: none;
+  }
+  .service-flight path {
+    animation: none;
+  }
+}

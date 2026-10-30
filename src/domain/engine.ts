@@ -3,6 +3,7 @@ import type {
   Match,
   MatchScore,
   MatchSuggestion,
+  ScoreAction,
   Player,
   PlayerStats,
   Session,
@@ -120,44 +121,173 @@ function describeScore(games: GameState[], session: Session): MatchScore {
   }
 }
 
+/** A surviving, verified scoring operation and its one-based game number. */
+export interface EffectiveScoreAction {
+  action: ScoreAction
+  game: number
+  sourceIndex: number
+}
+
+function applyScoreAction(
+  games: GameState[],
+  action: ScoreAction,
+  match: Match,
+  session: Session,
+): GameState[] | null {
+  if (action.kind === 'adjust' && action.scores) {
+    try {
+      return validateEntries(match, session, action.scores)
+    } catch {
+      return null
+    }
+  }
+  if (action.kind !== 'point' || !action.side || describeScore(games, session).complete) return null
+  const next = cloneGames(games)
+  const game = next.at(-1)!
+  if (action.side === 'A') game.a++
+  else game.b++
+  const team = action.side === 'A' ? match.teamA : match.teamB
+  if (action.playerId && team.includes(action.playerId) && !action.synthetic)
+    game.credits[action.playerId] = (game.credits[action.playerId] ?? 0) + 1
+  if (winningSide(game, session) && !describeScore(next, session).complete) next.push(emptyGame())
+  return next
+}
+
 function replayScoreActions(
   match: Match,
   session: Session,
-): { score: MatchScore; games: GameState[]; undoDepth: number } {
+): { score: MatchScore; games: GameState[]; undoDepth: number; effective: EffectiveScoreAction[] } {
   let games = [emptyGame()]
-  const history: GameState[][] = []
+  let effective: EffectiveScoreAction[] = []
+  // Patches keep undo atomic without copying an entire rally log for every tap.
+  const history: {
+    games: GameState[]
+    added?: boolean
+    removed?: { event: EffectiveScoreAction; index: number }
+  }[] = []
   const seen = new Set<string>()
-  for (const action of match.actions) {
+  for (let sourceIndex = 0; sourceIndex < match.actions.length; sourceIndex++) {
+    const action = match.actions[sourceIndex]
     if (seen.has(action.id)) continue
     seen.add(action.id)
     if (action.kind === 'undo') {
-      if (history.length) games = history.pop()!
-      continue
-    }
-    if (action.kind === 'adjust' && action.scores) {
-      try {
-        const adjusted = validateEntries(match, session, action.scores)
-        history.push(cloneGames(games))
-        games = adjusted
-      } catch {
-        /* Invalid imported actions cannot corrupt a verified score. */
+      const previous = history.pop()
+      if (previous) {
+        games = previous.games
+        if (previous.added) effective.pop()
+        else if (previous.removed)
+          effective.splice(previous.removed.index, 0, previous.removed.event)
       }
       continue
     }
-    if (action.kind !== 'point' || !action.side || describeScore(games, session).complete) continue
-    history.push(cloneGames(games))
-    const next = cloneGames(games)
-    const game = next.at(-1)!
-    if (action.side === 'A') game.a++
-    else game.b++
-    const team = action.side === 'A' ? match.teamA : match.teamB
-    if (action.playerId && team.includes(action.playerId) && !action.synthetic)
-      game.credits[action.playerId] = (game.credits[action.playerId] ?? 0) + 1
-    const summary = describeScore(next, session)
-    if (winningSide(game, session) && !summary.complete) next.push(emptyGame())
+    if (action.kind === 'remove') {
+      const index = effective.findIndex((event) => event.action.id === action.targetId)
+      const target = effective[index]
+      // Minus never reaches back into a previous game. Use the full editor for that.
+      if (
+        !target ||
+        target.action.kind !== 'point' ||
+        target.game !== games.length ||
+        (action.side && target.action.side !== action.side)
+      )
+        continue
+      const remaining = effective.filter((_, i) => i !== index)
+      let rebuilt = [emptyGame()]
+      let valid = true
+      for (const event of remaining) {
+        const next = applyScoreAction(rebuilt, event.action, match, session)
+        if (!next) {
+          valid = false
+          break
+        }
+        rebuilt = next
+      }
+      if (!valid) continue
+      history.push({ games: cloneGames(games), removed: { event: target, index } })
+      effective = remaining
+      games = rebuilt
+      continue
+    }
+    const next = applyScoreAction(games, action, match, session)
+    if (!next) continue
+    history.push({ games: cloneGames(games), added: true })
+    effective.push({ action, game: games.length, sourceIndex })
     games = next
   }
-  return { score: describeScore(games, session), games, undoDepth: history.length }
+  return { score: describeScore(games, session), games, undoDepth: history.length, effective }
+}
+
+/** Exact surviving operations; removes and undo are resolved without fabricated rallies. */
+export function getEffectiveScoreActions(match: Match, session: Session): EffectiveScoreAction[] {
+  return replayScoreActions(match, session).effective
+}
+
+/** Retract the latest known rally for this side in the displayed game. */
+export function removePoint(
+  match: Match,
+  session: Session,
+  side: Side,
+  playerId?: string,
+  now = Date.now(),
+): Match {
+  if (match.status !== 'playing') throw new Error('Only a playing match can be scored.')
+  const replay = replayScoreActions(match, session)
+  const current = replay.games.at(-1)!
+  const key = side === 'A' ? 'a' : 'b'
+  const team = side === 'A' ? match.teamA : match.teamB
+  if (playerId && !team.includes(playerId)) throw new Error('Choose a player on this side.')
+  if (current[key] === 0 || (playerId && !(current.credits[playerId] > 0))) return match
+  // An adjustment is a new score baseline: never remove a pre-baseline rally whose
+  // value the snapshot would simply restore.
+  const lastAdjustment = replay.effective.map((event) => event.action.kind).lastIndexOf('adjust')
+  const target = replay.effective
+    .slice(lastAdjustment + 1)
+    .reverse()
+    .find(
+      (event) =>
+        event.game === replay.games.length &&
+        event.action.kind === 'point' &&
+        event.action.side === side &&
+        (!playerId || (event.action.playerId === playerId && !event.action.synthetic)),
+    )
+  if (target) {
+    const changed: Match = {
+      ...match,
+      revision: match.revision + 1,
+      actions: [
+        ...match.actions,
+        {
+          id: crypto.randomUUID(),
+          kind: 'remove',
+          side,
+          targetId: target.action.id,
+          at: now,
+        },
+      ],
+    }
+    const actual = replayScoreActions(changed, session).games
+    if (actual.length === replay.games.length && actual.at(-1)![key] === current[key] - 1)
+      return changed
+  }
+  // Imported/typed totals have no rally order. Correct the snapshot, keeping
+  // unassigned points first and reducing a known credit only when necessary.
+  const entries = cloneGames(replay.games)
+  const entry = entries.at(-1)!
+  entry[key]--
+  if (playerId) entry.credits[playerId]--
+  else {
+    const credited = team.reduce((sum, id) => sum + (entry.credits[id] ?? 0), 0)
+    if (credited > entry[key]) {
+      const candidates = team.filter((id) => (entry.credits[id] ?? 0) > 0)
+      if (candidates.length > 1)
+        throw new Error(
+          'Choose which player’s point to remove using their − button, or edit the point allocation.',
+        )
+      const id = candidates[0]
+      if (id) entry.credits[id]--
+    }
+  }
+  return adjustMatchScores(match, session, entries, now)
 }
 
 /** Replays legacy rallies and explicit adjustments. Undo restores one whole previous operation. */

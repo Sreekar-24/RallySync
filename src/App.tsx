@@ -35,6 +35,7 @@ import { Modal, Shuttle } from './components'
 import PlayPage, { FinalScoreEntry } from './features/PlayPage'
 import './features/collection.css'
 import DataMaintenance from './features/DataMaintenance'
+import { AppearanceSettings, ThemePicker } from './lib/theme'
 
 const PeoplePage = lazy(() => import('./features/PeoplePage'))
 const HistoryPage = lazy(() => import('./features/HistoryPage'))
@@ -251,6 +252,7 @@ export default function App() {
               </strong>
             </button>
             <div className="topbar-actions">
+              <ThemePicker />
               <span className="today-date">
                 <Clock3 size={14} />
                 {new Date().toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
@@ -357,6 +359,7 @@ export default function App() {
                   <button className="button primary" onClick={exitDemo}>
                     Exit demo
                   </button>
+                  <AppearanceSettings />
                 </div>
               ) : (
                 <>

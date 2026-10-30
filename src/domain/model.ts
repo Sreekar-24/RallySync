@@ -33,12 +33,27 @@ export interface Session {
 
 export interface ScoreAction {
   id: string
-  kind: 'point' | 'undo' | 'adjust'
+  kind: 'point' | 'undo' | 'adjust' | 'remove'
   side?: Side
   playerId?: string
   /** Explicit snapshot correction: one entry per completed game plus current game. */
   scores?: { a: number; b: number; credits?: Record<string, number> }[]
   synthetic?: boolean
+  /** A minus tap retracts an actual rally rather than inventing a new rally order. */
+  targetId?: string
+  at: number
+}
+
+/** Confirmed next-serve positions at an auditable point in the scoring history. */
+export interface ServiceSetup {
+  game: number
+  a: number
+  b: number
+  afterActionId?: string
+  /** Each doubles side is ordered [own right court, own left court]. */
+  positions: { A: string[]; B: string[] }
+  servingSide: Side
+  nearSide: Side
   at: number
 }
 
@@ -54,6 +69,7 @@ export interface Match {
   actions: ScoreAction[]
   revision: number
   planSlotId?: string
+  serviceSetup?: ServiceSetup
 }
 
 export interface AppData {

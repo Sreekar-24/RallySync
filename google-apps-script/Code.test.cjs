@@ -464,3 +464,66 @@ test('rejects unknown v2 fields and prototype-property payloads instead of losin
   assert.equal(api.push(malicious, 0, 'bad-prototype').code, 'INVALID_DATA')
   assert.equal(api.pull().revision, 0)
 })
+
+test('position checkpoints and minus events round-trip without losing original rally history', () => {
+  const api = harness()
+  const data = fixture()
+  data.matches[0].serviceSetup = {
+    game: 1,
+    a: 1,
+    b: 0,
+    afterActionId: 'action1',
+    positions: { A: ['p1'], B: ['p2'] },
+    servingSide: 'A',
+    nearSide: 'B',
+    at: 13,
+  }
+  data.matches[0].actions.push({
+    id: 'remove1',
+    kind: 'remove',
+    side: 'A',
+    targetId: 'action1',
+    at: 14,
+  })
+  assert.equal(api.push(data, 0, 'positions').ok, true)
+  assert.deepEqual(api.pull().data, data)
+})
+
+test('invalid serving positions and removal references never replace a shared snapshot', () => {
+  const api = harness()
+  const data = fixture()
+  assert.equal(api.push(data, 0, 'initial-v3').ok, true)
+  const invalidPosition = structuredClone(data)
+  invalidPosition.matches[0].serviceSetup = {
+    game: 1,
+    a: 1,
+    b: 0,
+    afterActionId: 'action1',
+    positions: { A: ['p2'], B: ['p1'] },
+    servingSide: 'A',
+    nearSide: 'A',
+    at: 13,
+  }
+  assert.equal(api.push(invalidPosition, 1, 'bad-position').ok, false)
+  for (const targetId of ['missing', 'remove1']) {
+    const invalidRemoval = structuredClone(data)
+    invalidRemoval.matches[0].actions.push({
+      id: 'remove1',
+      kind: 'remove',
+      side: 'A',
+      targetId,
+      at: 14,
+    })
+    assert.equal(api.push(invalidRemoval, 1, 'bad-target-' + targetId).ok, false)
+  }
+  const wrongSide = structuredClone(data)
+  wrongSide.matches[0].actions.push({
+    id: 'remove1',
+    kind: 'remove',
+    side: 'B',
+    targetId: 'action1',
+    at: 14,
+  })
+  assert.equal(api.push(wrongSide, 1, 'bad-side').ok, false)
+  assert.deepEqual(api.pull().data, data)
+})

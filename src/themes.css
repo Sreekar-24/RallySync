@@ -1,0 +1,719 @@
+/* Shared appearance tokens are also available to new courtside components. */
+:root {
+  color-scheme: light;
+  --theme-surface: #fff;
+  --theme-raised: #eef3e8;
+  --theme-canvas: #f6f7f5;
+  --theme-ink: #20352f;
+  --theme-muted: #58685d;
+  --theme-line: #dfe5dc;
+  --theme-accent: #d9f96c;
+  --theme-accent-ink: #20321c;
+  --theme-accent-soft: #eaf4dc;
+  --theme-danger: #a44936;
+  --theme-danger-soft: #fff0e9;
+  --theme-warning-soft: #fff5e5;
+}
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --theme-surface: #172726;
+  --theme-raised: #233836;
+  --theme-canvas: #101b1b;
+  --theme-ink: #edf4ee;
+  --theme-muted: #b2c4ba;
+  --theme-line: #48605b;
+  --theme-accent-soft: #34492b;
+  --theme-danger: #ffb8a1;
+  --theme-danger-soft: #3c2522;
+  --theme-warning-soft: #3a3022;
+}
+:root[data-theme='contrast'] {
+  color-scheme: dark;
+  --theme-surface: #000;
+  --theme-raised: #101010;
+  --theme-canvas: #000;
+  --theme-ink: #fff;
+  --theme-muted: #fff;
+  --theme-line: #a5adb0;
+  --theme-accent: #f8ff65;
+  --theme-accent-soft: #22241b;
+  --theme-danger: #ffbda9;
+  --theme-danger-soft: #27140c;
+  --theme-warning-soft: #272108;
+}
+.theme-picker {
+  position: relative;
+  flex: none;
+  z-index: 45;
+}
+.theme-picker > summary {
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--theme-line);
+  border-radius: 11px;
+  background: var(--theme-surface);
+  color: var(--theme-ink);
+  cursor: pointer;
+  list-style: none;
+  touch-action: manipulation;
+}
+.theme-picker > summary::-webkit-details-marker {
+  display: none;
+}
+.theme-picker > summary:focus-visible {
+  outline: 3px solid #7b9b41;
+  outline-offset: 3px;
+}
+.theme-picker[open] > summary {
+  background: var(--theme-accent-soft);
+}
+.theme-popover {
+  position: absolute;
+  top: calc(100% + 11px);
+  right: 0;
+  width: min(290px, calc(100vw - 32px));
+  padding: 16px 10px 10px;
+  margin: 0;
+  border: 1px solid var(--theme-line);
+  border-radius: 14px;
+  background: var(--theme-surface);
+  color: var(--theme-ink);
+  box-shadow: 0 12px 35px #0003;
+}
+.theme-popover > legend {
+  float: left;
+  width: 100%;
+  padding: 0 7px 12px;
+  font-size: 11px;
+  font-weight: 750;
+}
+.theme-popover label,
+.appearance-options label {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 12px 10px;
+  min-height: 56px;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  cursor: pointer;
+  position: relative;
+  color: var(--theme-ink);
+}
+.theme-popover label:hover,
+.appearance-options label:hover {
+  background: var(--theme-raised);
+}
+.theme-popover label.selected,
+.appearance-options label.selected {
+  background: var(--theme-accent-soft);
+  border-color: var(--theme-line);
+}
+.theme-popover label:focus-within,
+.appearance-options label:focus-within {
+  outline: 2px solid #7b9b41;
+  outline-offset: 2px;
+}
+.theme-popover input,
+.appearance-options input {
+  width: 1px;
+  height: 1px;
+  min-height: 0;
+  padding: 0;
+  margin: -1px;
+  opacity: 0;
+  position: absolute;
+}
+.theme-popover label > span,
+.appearance-options label > span {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+.theme-popover strong,
+.appearance-options strong {
+  font-size: 12px;
+  font-weight: 750;
+}
+.theme-popover small,
+.appearance-options small {
+  color: var(--theme-muted);
+  font-size: 10px;
+  line-height: 1.6;
+}
+.theme-popover > p {
+  padding: 11px 7px 3px;
+  margin-top: 8px;
+  font-size: 10px;
+  line-height: 1.6;
+  color: var(--theme-muted);
+  border-top: 1px solid var(--theme-line);
+}
+.appearance-settings {
+  padding: 23px;
+  margin-bottom: 24px;
+  border: 1px solid var(--theme-line);
+  border-radius: 16px;
+  background: var(--theme-surface);
+  color: var(--theme-ink);
+  text-align: left;
+}
+.appearance-heading {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  margin-bottom: 16px;
+}
+.appearance-heading h2 {
+  font-size: 16px;
+  letter-spacing: -0.3px;
+}
+.appearance-heading p {
+  font-size: 11px;
+  color: var(--theme-muted);
+  line-height: 1.7;
+  margin-top: 6px;
+}
+.appearance-options {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 9px;
+  border: 0;
+  margin: 0;
+  padding: 0;
+}
+.appearance-options label {
+  border-color: var(--theme-line);
+  padding: 13px 11px;
+}
+.appearance-motion-note {
+  margin-top: 14px !important;
+  font-size: 10px !important;
+  color: var(--theme-muted);
+  line-height: 1.7;
+}
+.demo-settings-empty .appearance-settings {
+  margin-top: 15px;
+  width: 100%;
+}
+
+/* Theme overrides use shared surfaces instead of changing illustration colors.
+   The court diagrams deliberately retain their own clearly labelled palette. */
+:root:is([data-theme='dark'], [data-theme='contrast']) {
+  color: var(--theme-ink);
+  background: var(--theme-canvas);
+  --surface: var(--theme-surface);
+  --canvas: var(--theme-canvas);
+  --line: var(--theme-line);
+  --muted: var(--theme-muted);
+}
+:root:is([data-theme='dark'], [data-theme='contrast']) body {
+  background: var(--theme-canvas);
+  color: var(--theme-ink);
+}
+:root:is([data-theme='dark'], [data-theme='contrast']) body * {
+  border-color: var(--theme-line);
+}
+:root:is([data-theme='dark'], [data-theme='contrast'])
+  body
+  :is(
+    h1,
+    h2,
+    h3,
+    h4,
+    p,
+    small,
+    strong,
+    span,
+    dt,
+    dd,
+    td,
+    th,
+    label,
+    legend,
+    button,
+    a,
+    summary,
+    code,
+    pre
+  ) {
+  color: var(--theme-ink);
+}
+:root:is([data-theme='dark'], [data-theme='contrast'])
+  body
+  :is(
+    .muted,
+    small,
+    .field-help,
+    .score-help,
+    .eyebrow,
+    .settings-description,
+    .settings-meta,
+    .schedule-eyebrow,
+    .insights-scope-note,
+    .appearance-motion-note
+  ) {
+  color: var(--theme-muted);
+}
+:root:is([data-theme='dark'], [data-theme='contrast']) body :is(input, select, textarea) {
+  background-color: var(--theme-surface);
+  color: var(--theme-ink);
+  border-color: var(--theme-line);
+  accent-color: var(--theme-accent);
+}
+:root:is([data-theme='dark'], [data-theme='contrast']) body input::placeholder,
+:root:is([data-theme='dark'], [data-theme='contrast']) body textarea::placeholder {
+  color: var(--theme-muted);
+  opacity: 1;
+}
+:root:is([data-theme='dark'], [data-theme='contrast'])
+  body
+  :is(
+    .sidebar,
+    .topbar,
+    .mobile-navigation,
+    .mobile-more,
+    .panel,
+    .stat-card,
+    .floating-label,
+    .modal,
+    .collection-dialog,
+    .collection-heading-icon,
+    .collection-button,
+    .collection-search,
+    .collection-select,
+    .collection-empty,
+    .people-overview,
+    .people-card,
+    .history-overview,
+    .history-session,
+    .rankings-intro,
+    .rankings-table tbody tr,
+    .settings-card,
+    .settings-button,
+    .settings-icon-button,
+    .session-more-menu,
+    .demo-banner .button,
+    .report-button,
+    .insights-controls,
+    .insights-section,
+    .schedule-button,
+    .schedule-stats,
+    .schedule-match,
+    .schedule-fairness,
+    .schedule-llm,
+    .planning-basis > button,
+    .planning-weight-intro button,
+    .score-add,
+    .individual-point,
+    .score-subtract,
+    .individual-remove,
+    .button.ghost,
+    .mode-option,
+    .scoring-mode-options > button
+  ) {
+  background: var(--theme-surface);
+  color: var(--theme-ink);
+}
+:root:is([data-theme='dark'], [data-theme='contrast'])
+  body
+  :is(
+    .sidebar-tip,
+    .club-avatar,
+    .tag,
+    .empty-court,
+    .session-steps b,
+    .rules-promo,
+    .recent-match-icon,
+    .court-card,
+    .court-number,
+    .player-chip,
+    .notice,
+    .final-score-entry,
+    .step-number,
+    .collection-count,
+    .collection-empty-icon,
+    .collection-icon.muted,
+    .collection-status,
+    .people-level-picker label > span:first-of-type,
+    .history-date,
+    .rankings-table thead,
+    .history-match-correct,
+    .maintenance-icon,
+    .play-view-tabs,
+    .availability-editor,
+    .settings-card-icon,
+    .settings-records,
+    .settings-export-art,
+    .settings-csv-tag,
+    .settings-status,
+    .settings-sync-help,
+    .settings-sync-help > span,
+    .settings-sync-state,
+    .settings-reset,
+    .settings-notice,
+    .settings-preview,
+    .settings-backup-step,
+    .insights-player-options label,
+    .insights-tabs,
+    .insights-table thead,
+    .insights-note,
+    .insights-explanation,
+    .insights-empty > span,
+    .insights-coverage,
+    .insights-threshold-note,
+    .schedule-round-number,
+    .schedule-match.is-completed,
+    .schedule-match.is-abandoned,
+    .schedule-status,
+    .schedule-table-scroll thead th,
+    .schedule-llm-icon,
+    .schedule-llm-steps b,
+    .schedule-code-panel,
+    .schedule-empty,
+    .planning-advanced-toggle > span,
+    .planning-weight-panel,
+    .score-editor,
+    .scoring-mode-select,
+    .rules-heading-mark,
+    .rules-search,
+    .rules-card,
+    .rules-card-topic,
+    .rules-empty,
+    .rules-source,
+    .rules-source-icon
+  ) {
+  background: var(--theme-raised);
+  color: var(--theme-ink);
+}
+:root:is([data-theme='dark'], [data-theme='contrast'])
+  body
+  :is(
+    .nav-item.active,
+    .mobile-navigation > button.active,
+    .button.soft,
+    .tag-live,
+    .court-live,
+    .player-chip.selected,
+    .mode-option.selected,
+    .match-complete,
+    .direct-score-actions,
+    .collection-status.live,
+    .collection-icon,
+    .people-level-picker label.selected,
+    .rankings-table tbody tr.leading,
+    .demo-banner,
+    .scoring-mode-options > button.selected,
+    .report-button.primary,
+    .settings-heading-icon,
+    .settings-card-icon.lime,
+    .settings-status.connected,
+    .settings-role > label.selected,
+    .settings-backup-step.complete,
+    .insights-form,
+    .schedule-button.start,
+    .schedule-status.live,
+    .schedule-preview-summary > span,
+    .planning-basis > button.selected,
+    .schedule-empty > span
+  ) {
+  background: var(--theme-accent-soft);
+  color: var(--theme-ink);
+}
+:root:is([data-theme='dark'], [data-theme='contrast'])
+  body
+  :is(
+    .notice.warning,
+    .save-status.offline,
+    .settings-sync-state.has-error,
+    .schedule-warnings,
+    .rules-card-topic.is-house
+  ) {
+  background: var(--theme-warning-soft);
+  color: var(--theme-ink);
+}
+:root:is([data-theme='dark'], [data-theme='contrast'])
+  body
+  :is(
+    .app-notice.error,
+    .settings-alert,
+    .collection-error,
+    .score-editor-error,
+    .schedule-alert,
+    .save-status.needs-attention,
+    .insights-form.negative,
+    .collection-button.danger,
+    .settings-button.danger
+  ) {
+  background: var(--theme-danger-soft);
+  color: var(--theme-danger);
+}
+:root:is([data-theme='dark'], [data-theme='contrast'])
+  body
+  :is(.danger-ghost, .session-delete-trigger, .session-delete-trigger span) {
+  color: var(--theme-danger);
+}
+:root:is([data-theme='dark'], [data-theme='contrast']) body :is(.score-side, .score-side-a) {
+  background: #22352a;
+}
+:root:is([data-theme='dark'], [data-theme='contrast']) body .score-side-b {
+  background: #302a3a;
+}
+:root:is([data-theme='dark'], [data-theme='contrast'])
+  body
+  :is(
+    .avatar,
+    .collection-avatar,
+    .stat-icon,
+    .settings-card-icon.peach,
+    .settings-card-icon.blue
+  ) {
+  background: var(--theme-raised);
+  color: var(--theme-ink);
+}
+:root:is([data-theme='dark'], [data-theme='contrast'])
+  body
+  :is(
+    .nav-item:hover,
+    .icon-button:hover,
+    .collection-button:hover,
+    .collection-icon-button:hover,
+    .settings-button:hover,
+    .schedule-button:hover,
+    .schedule-icon-button:hover,
+    .schedule-icon-button.selected,
+    .history-session-toggle:hover,
+    .history-match-correct:hover,
+    .report-button:hover,
+    .session-more-menu button:hover,
+    .rules-topics button:hover
+  ) {
+  background: var(--theme-raised);
+  color: var(--theme-ink);
+}
+:root:is([data-theme='dark'], [data-theme='contrast'])
+  body
+  :is(
+    .play-view-tabs button.active,
+    .insights-tabs button.active,
+    .rules-mode button[aria-pressed='true']
+  ) {
+  background: var(--theme-accent-soft);
+  color: var(--theme-ink);
+}
+:root:is([data-theme='dark'], [data-theme='contrast'])
+  body
+  :is(
+    .button.primary,
+    .button.lime,
+    .collection-button.primary,
+    .settings-button.primary,
+    .schedule-button.primary,
+    .rules-next,
+    .rules-empty button
+  ) {
+  background: var(--theme-accent);
+  border-color: var(--theme-accent);
+  color: var(--theme-accent-ink);
+}
+:root:is([data-theme='dark'], [data-theme='contrast'])
+  body
+  :is(
+    .button.primary,
+    .button.lime,
+    .collection-button.primary,
+    .settings-button.primary,
+    .schedule-button.primary,
+    .rules-next,
+    .rules-empty button
+  )
+  * {
+  color: var(--theme-accent-ink);
+}
+:root:is([data-theme='dark'], [data-theme='contrast']) body :is(.app-notice, .save-status) {
+  background: var(--theme-raised);
+}
+:root:is([data-theme='dark'], [data-theme='contrast']) body .direct-score-input {
+  background: var(--theme-surface);
+  color: var(--theme-ink);
+  border-color: var(--theme-line);
+}
+:root:is([data-theme='dark'], [data-theme='contrast']) body .direct-score-input:focus {
+  background: var(--theme-surface);
+}
+:root:is([data-theme='dark'], [data-theme='contrast'])
+  body
+  :is(
+    .brand-mark,
+    .session-banner,
+    .session-banner-icon,
+    .rules-explainer,
+    .schedule-code-panel pre
+  ) {
+  background: #142a30;
+  color: #fff;
+}
+:root:is([data-theme='dark'], [data-theme='contrast']) body .rules-topics button.is-active {
+  background: var(--theme-accent);
+  color: var(--theme-accent-ink);
+}
+:root:is([data-theme='dark'], [data-theme='contrast']) body .insights-time-bar,
+:root:is([data-theme='dark'], [data-theme='contrast']) body .insights-comparison {
+  background: #746389;
+}
+:root:is([data-theme='dark'], [data-theme='contrast'])
+  body
+  :is(.insights-time-bar > i, .insights-comparison > i, .schedule-minute-bar i) {
+  background: var(--theme-accent);
+}
+:root:is([data-theme='dark'], [data-theme='contrast']) body :focus-visible {
+  outline-color: var(--theme-accent);
+}
+:root[data-theme='contrast']
+  body
+  :is(
+    .score-side,
+    .score-side-b,
+    .welcome-hero,
+    .brand-mark,
+    .session-banner,
+    .session-banner-icon,
+    .rules-explainer,
+    .rules-court-wrap,
+    .schedule-code-panel pre
+  ) {
+  background: #000;
+}
+:root[data-theme='contrast']
+  body
+  :is(
+    .panel,
+    .settings-card,
+    .people-card,
+    .history-session,
+    .schedule-match,
+    .rules-card,
+    .modal,
+    .collection-dialog,
+    .score-side,
+    .theme-picker > summary,
+    .theme-popover,
+    .appearance-settings,
+    .insights-section
+  ) {
+  border: 1px solid var(--theme-line);
+}
+:root[data-theme='contrast']
+  body
+  :is(
+    .button,
+    .settings-button,
+    .collection-button,
+    .schedule-button,
+    .report-button,
+    .icon-button,
+    .collection-icon-button,
+    .schedule-icon-button
+  ) {
+  border: 1px solid var(--theme-line);
+}
+:root[data-theme='contrast'] body a {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+/* Small responses to deliberate interaction; status and loading icons keep their
+   own animations. No decorative loops or movement during point entry. */
+@media (prefers-reduced-motion: no-preference) {
+  :is(button, a.nav-item, .theme-picker > summary)
+    > svg:not(.spin, .settings-spin, .rotate-90, .lucide-chevron-down, .lucide-chevron-right) {
+    transition: transform 160ms ease;
+  }
+  :is(button, a.nav-item, .theme-picker > summary):hover
+    > svg:not(.spin, .settings-spin, .rotate-90, .lucide-chevron-down, .lucide-chevron-right) {
+    transform: translateY(-1px) rotate(-4deg);
+  }
+  :is(button, a.nav-item, .theme-picker > summary):active
+    > svg:not(.spin, .settings-spin, .rotate-90, .lucide-chevron-down, .lucide-chevron-right) {
+    transform: scale(0.92);
+  }
+  .theme-picker[open] .theme-popover {
+    animation: theme-arrive 140ms ease both;
+  }
+  @keyframes theme-arrive {
+    from {
+      opacity: 0;
+      transform: translateY(-4px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+}
+@media (max-width: 1100px) {
+  .appearance-options {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 640px) {
+  .appearance-settings {
+    padding: 19px 16px;
+  }
+  .appearance-options {
+    gap: 8px;
+  }
+  .appearance-options label {
+    gap: 8px;
+    padding: 11px 9px;
+  }
+  .appearance-options small {
+    font-size: 10px;
+  }
+  .topbar-actions {
+    gap: 7px;
+  }
+  .theme-popover {
+    right: -75px;
+  }
+}
+@media (max-width: 420px) {
+  .topbar-actions .save-status {
+    width: 30px;
+    min-height: 30px;
+    justify-content: center;
+    padding: 5px;
+  }
+  .topbar-actions .save-status > span:last-child {
+    display: none;
+  }
+  .theme-popover {
+    right: -35px;
+  }
+  .appearance-options label {
+    flex-wrap: wrap;
+  }
+  .appearance-options label > span {
+    flex-basis: calc(100% - 32px);
+  }
+  .appearance-options label > svg:last-child:not(:first-of-type) {
+    display: none;
+  }
+}
+
+:root:is([data-theme='dark'], [data-theme='contrast']) body .settings-heading > div > p:last-child,
+:root:is([data-theme='dark'], [data-theme='contrast']) body .rules-footer-note {
+  color: var(--theme-muted);
+}
+
+:root:is([data-theme='dark'], [data-theme='contrast']) body .service-player.is-serving,
+:root:is([data-theme='dark'], [data-theme='contrast']) body .service-player.is-serving * {
+  color: var(--theme-accent-ink);
+}
+:root:is([data-theme='dark'], [data-theme='contrast']) body .service-needs-check .service-status {
+  color: var(--theme-danger);
+}

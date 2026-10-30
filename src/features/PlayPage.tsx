@@ -27,6 +27,7 @@ import SessionActions from './SessionActions'
 import ReportActions from './ReportActions'
 import AvailabilityWindow from './AvailabilityWindow'
 import { downloadBackup } from '../lib/storage'
+import { getServiceState } from '../domain/serving'
 
 function currentlyAvailable(session: Session, id: string, now = Date.now()) {
   const window = session.availability?.[id]
@@ -419,6 +420,7 @@ export default function PlayPage({
                 const court = index + 1
                 const match = activeMatches.find((m) => m.court === court)
                 const score = match ? scoreMatch(match, session) : null
+                const service = match ? getServiceState(match, session) : null
                 const suggestion = !match ? suggestions.get(court) : null
                 const teamA = match?.teamA ?? suggestion?.teamA ?? []
                 const teamB = match?.teamB ?? suggestion?.teamB ?? []
@@ -438,7 +440,10 @@ export default function PlayPage({
                         <div className="court-teams">
                           <div>
                             {teamA.map((id) => (
-                              <div className="court-person" key={id}>
+                              <div
+                                className={`court-person ${service?.status === 'ready' && service.serverId === id ? 'is-serving' : ''}`}
+                                key={id}
+                              >
                                 <Avatar
                                   name={playerName(id)}
                                   index={data.players.findIndex((p) => p.id === id)}
@@ -461,7 +466,10 @@ export default function PlayPage({
                           </div>
                           <div>
                             {teamB.map((id) => (
-                              <div className="court-person" key={id}>
+                              <div
+                                className={`court-person ${service?.status === 'ready' && service.serverId === id ? 'is-serving' : ''}`}
+                                key={id}
+                              >
                                 <Avatar
                                   name={playerName(id)}
                                   index={data.players.findIndex((p) => p.id === id)}
@@ -477,6 +485,24 @@ export default function PlayPage({
                             ? `${session.bestOf === 3 ? `Games ${score?.gamesA}–${score?.gamesB} · ` : ''}${Math.max(0, Math.floor((now - match.startedAt) / 60000))} min on court`
                             : suggestion?.reason}
                         </p>
+                        {service?.status === 'ready' && service.serverId && (
+                          <div className="court-service-indicator">
+                            <Shuttle size={15} />
+                            <span>
+                              {playerName(service.serverId)} serves ·{' '}
+                              {(service.servingSide === 'A' ? score!.a : score!.b) % 2 === 0
+                                ? 'right'
+                                : 'left'}{' '}
+                              court
+                            </span>
+                          </div>
+                        )}
+                        {service?.status === 'check' && (
+                          <div className="court-service-indicator">
+                            <CircleHelp size={15} />
+                            <span>Score corrected · check service positions</span>
+                          </div>
+                        )}
                         <div className="court-actions">
                           <button
                             className={`button ${match ? 'primary' : 'soft'}`}

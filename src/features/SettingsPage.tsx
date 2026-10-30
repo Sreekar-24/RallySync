@@ -27,6 +27,7 @@ import { downloadBackup, downloadFile, readBackup } from '../lib/storage'
 import { validateSheetEndpoint } from '../lib/sheets'
 import { useRally } from '../store'
 import './settings.css'
+import { AppearanceSettings } from '../lib/theme'
 
 const guideUrl = 'https://github.com/Sreekar-24/RallySync/blob/main/google-apps-script/README.md'
 
@@ -281,6 +282,7 @@ export default function SettingsPage() {
         </p>
       )}
 
+      <AppearanceSettings />
       <div className="settings-grid">
         <section className="settings-card settings-backup" aria-labelledby="backup-title">
           <div className="settings-card-heading">

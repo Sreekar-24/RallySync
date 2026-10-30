@@ -2,7 +2,7 @@
 
 **Less organizing. More badminton.** A responsive, installable courtside companion for your regular crew, hosted as a static app with no required backend or player accounts.
 
-Interface previews: [desktop clubhouse](docs/screenshots/desktop.png) · [mobile scoring](docs/screenshots/mobile-scoring.png) · [interactive rules](docs/screenshots/rules.png) · [full schedule](docs/screenshots/schedule.png) · [partnership insights](docs/screenshots/partnerships.png).
+Interface previews: [desktop clubhouse](docs/screenshots/desktop.png) · [mobile scoring](docs/screenshots/mobile-scoring.png) · [dark scoring](docs/screenshots/dark-scoring.png) · [interactive rules](docs/screenshots/rules.png) · [full schedule](docs/screenshots/schedule.png) · [partnership insights](docs/screenshots/partnerships.png).
 
 ## What works
 
@@ -12,11 +12,14 @@ Interface previews: [desktop clubhouse](docs/screenshots/desktop.png) · [mobile
 - Lock future lineups, edit pairings, swap an equivalent future matchup where practical, and repair remaining assignments. Active/completed matches stay intact.
 - Team, individual, or combined doubles scoring: a credited player point adds exactly one to their side. Unassigned points remain explicit.
 - Editable totals and per-game/player allocation, atomic undo, deuce/caps, 11/15-point house games, 21-point games, and one-game/best-of-three matches. A winning score is provisional until **Confirm result**.
+- Touch-friendly plus/minus counters beside directly editable score boxes, including individual credited-point removal. Known rallies replay exactly; typed corrections remain auditable and undoable.
+- A compact next-serve court: tap the first server, swap partners to match actual service positions, and flip the view. Server, diagonal receiver, and right/left courts follow rallies automatically. Position checks after manual corrections avoid guessing doubles rotation.
 - Correct accepted results from History or the schedule without double-counting a match. Delete one session without clearing unrelated sessions or player identities.
 - All-time, today, custom-date, session, format, and selected-player rankings. Compare partnerships, opposing sides, contribution coverage, and participation. Weighted performance and provisional strength are explained separately from wins.
 - Scoped JSON/CSV analysis exports and print-ready PDF reports. Complete JSON backups remain a separate recovery format.
 - Optional external LLM planning: export context/prompt, import revision-checked JSON, preview, and apply. No AI API or subscription is needed by the app.
-- Searchable rules and an interactive service-court guide.
+- Searchable rules, named-player service rotations, optional step/play/pause lessons, and interactive service/rally boundaries. Receiving players stay fixed when service changes.
+- Device-local Light, Dark, High contrast, and System themes with keyboard-accessible controls and reduced-motion-aware interactions.
 - Offline PWA with **in-memory demo isolation**. Exit or reload to return to real data; demo changes never save or upload. Settings includes targeted cleanup for sample data from v0.1.
 - Optional Google Sheets snapshot sync with one organizer writer, polling viewers, and explicit conflict resolution.
 
@@ -27,6 +30,18 @@ The planner is a bounded, explainable heuristic rather than a trained ML model o
 Existing version-1 histories are migrated to version 2 without inventing individual attribution. Download a backup before updating important histories. If you use Google Sheets, **redeploy the updated Apps Script before syncing v2 data**, then update the other devices. The old script rejects v2 rather than silently discarding new fields. See the [upgrade guide](google-apps-script/README.md).
 
 The improved demo no longer uses real storage. Old persisted sample records are not silently removed; review **Settings → Sample data from the first version? → Review cleanup**. Renamed sample profiles and those referenced by real sessions are preserved.
+
+## Serving and score corrections
+
+In a live scoreboard, tap **Set first serve** or a player’s dot. Choose the server, swap each pair to match the real court, and select **Start tracking**. Right/left means each player’s own view facing the net; the opposite end is mirrored. The highlighted player serves and the dashed player receives. These show service courts, not fixed positions during rallies.
+
+When the serving side wins, only its partners swap courts. When the receiving side wins, nobody swaps; the next server follows that side’s new score parity. Singles uses the serving score to place both players diagonally. Each new game needs a first-server check; the previous game’s winning side serves first, with either partner selectable. Standard 21-point best-of-three automatically changes ends between games and at 11 in game three.
+
+**Minus** removes the latest eligible rally for that side in the displayed game and replays the surviving history. Individual minus removes the selected player’s latest known credited point. If a typed/imported total has no rally order, minus corrects its snapshot and asks you to check positions. When all snapshot points are credited to multiple partners, choose a player’s minus button or edit allocation rather than guessing whose credit to remove. Undo restores either operation in one step. To correct an earlier game after the next game starts, use **Undo last action** or **Edit all scores**.
+
+Typing totals cannot reconstruct doubles positions. **Check positions → Reset positions** saves a new court checkpoint without changing points. When a lower typed total conflicts with credited points, you can edit allocation or explicitly apply that game’s totals as unassigned. You can keep scoring without setting up the court; the app does not claim a server until positions are confirmed.
+
+This serving update adds optional checkpoint and rally-retraction fields to schema v2. Existing local histories still load. **Existing Sheets users must redeploy the latest script and update all devices**, including users already on v0.2; older strict validators reject the new fields rather than discard them.
 
 ## Develop
 

@@ -523,6 +523,7 @@ function validateData_(data) {
         'actions',
         'revision',
         'planSlotId',
+        'serviceSetup',
       ]) ||
       !id_(m.id) ||
       matches[m.id] ||
@@ -567,11 +568,20 @@ function validateData_(data) {
     for (var j = 0; j < m.actions.length; j++) {
       var a = m.actions[j]
       if (
-        !onlyKeys_(a, ['id', 'kind', 'side', 'playerId', 'scores', 'synthetic', 'at']) ||
+        !onlyKeys_(a, [
+          'id',
+          'kind',
+          'side',
+          'playerId',
+          'scores',
+          'synthetic',
+          'targetId',
+          'at',
+        ]) ||
         !id_(a.id) ||
         actions[a.id] ||
         !finite_(a.at) ||
-        ['point', 'undo', 'adjust'].indexOf(a.kind) < 0 ||
+        ['point', 'undo', 'adjust', 'remove'].indexOf(a.kind) < 0 ||
         (a.kind === 'point' && ['A', 'B'].indexOf(a.side) < 0)
       )
         return 'Invalid scoring action.'
@@ -584,8 +594,15 @@ function validateData_(data) {
         return 'Invalid synthetic flag.'
       if (a.kind === 'adjust' && !adjustment_(a.scores, m, session))
         return 'Invalid score adjustment.'
-      actions[a.id] = true
+      if (a.kind === 'remove') {
+        var target = actions[a.targetId]
+        if (!id_(a.targetId) || !target || target.kind !== 'point' || target.side !== a.side)
+          return 'A removed point must reference an earlier rally on the same side.'
+      } else if (a.targetId !== undefined) return 'Only a removed point can reference a rally.'
+      actions[a.id] = a
     }
+    if (m.serviceSetup !== undefined && !serviceSetup_(m.serviceSetup, m, session, actions))
+      return 'Invalid serving checkpoint.'
     if (m.endedAt !== undefined && m.endedAt < m.startedAt)
       return 'A match cannot end before it starts.'
     if (m.planSlotId !== undefined && !id_(m.planSlotId)) return 'Invalid schedule slot reference.'
@@ -685,6 +702,43 @@ function planning_(p) {
   }
   return true
 }
+function serviceSetup_(setup, match, session, actions) {
+  if (
+    !onlyKeys_(setup, [
+      'game',
+      'a',
+      'b',
+      'afterActionId',
+      'positions',
+      'servingSide',
+      'nearSide',
+      'at',
+    ]) ||
+    !integer_(setup.game, 1, session.bestOf) ||
+    !integer_(setup.a, 0, session.cap) ||
+    !integer_(setup.b, 0, session.cap) ||
+    !finite_(setup.at) ||
+    ['A', 'B'].indexOf(setup.servingSide) < 0 ||
+    ['A', 'B'].indexOf(setup.nearSide) < 0 ||
+    !onlyKeys_(setup.positions, ['A', 'B']) ||
+    (setup.afterActionId !== undefined &&
+      (!id_(setup.afterActionId) || !actions[setup.afterActionId]))
+  )
+    return false
+  for (var i = 0; i < 2; i++) {
+    var side = i === 0 ? 'A' : 'B',
+      team = i === 0 ? match.teamA : match.teamB,
+      positions = setup.positions[side],
+      allowed = Object.create(null)
+    team.forEach(function (id) {
+      allowed[id] = true
+    })
+    if (!Array.isArray(positions) || positions.length !== team.length || !ids_(positions, allowed))
+      return false
+  }
+  return true
+}
+
 function adjustment_(scores, match, session) {
   if (!Array.isArray(scores) || !scores.length || scores.length > session.bestOf) return false
   var winsA = 0,

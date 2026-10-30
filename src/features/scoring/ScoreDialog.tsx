@@ -1,10 +1,17 @@
 import { useState } from 'react'
-import { Check, CircleHelp, PencilLine, Plus, RotateCcw, Trophy, X } from 'lucide-react'
-import { Avatar, Modal } from '../../components'
+import { Check, CircleHelp, Minus, PencilLine, Plus, RotateCcw, Trophy, X } from 'lucide-react'
+import { Modal } from '../../components'
 import { useRally } from '../../store'
-import { adjustMatchScores, canUndoScore, getScoreEntries, scoreMatch } from '../../domain/engine'
+import {
+  adjustMatchScores,
+  canUndoScore,
+  getScoreEntries,
+  removePoint,
+  scoreMatch,
+} from '../../domain/engine'
 import type { Match, Session, Side } from '../../domain/model'
 import FinalScoreEntry from './FinalScoreEntry'
+import ServiceCourt from './ServiceCourt'
 import './scoring.css'
 
 export default function ScoreDialog({
@@ -22,12 +29,13 @@ export default function ScoreDialog({
   const score = scoreMatch(match, session)
   const [stopping, setStopping] = useState(false)
   const [editor, setEditor] = useState(false)
+  const [courtEditing, setCourtEditing] = useState(false)
   const [draft, setDraft] = useState<{ a: string; b: string; revision: number } | null>(null)
   const [error, setError] = useState('')
   const mode = session.scoringMode ?? 'team'
   const name = (id: string) => data.players.find((p) => p.id === id)?.name ?? 'Player'
   const addPoint = (side?: Side, playerId?: string) => {
-    if (draft) return
+    if (draft || courtEditing || editor) return
     commit((current) => ({
       ...current,
       matches: current.matches.map((m) => {
@@ -51,7 +59,21 @@ export default function ScoreDialog({
       }),
     }))
   }
-  const applyDirect = () => {
+  const subtractPoint = (side: Side, playerId?: string) => {
+    if (draft || courtEditing || editor) return
+    try {
+      commit((current) => ({
+        ...current,
+        matches: current.matches.map((m) =>
+          m.id === match.id && m.status === 'playing' ? removePoint(m, session, side, playerId) : m,
+        ),
+      }))
+      setError('')
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'This point could not be removed.')
+    }
+  }
+  const applyDirect = (clearCurrentCredits = false) => {
     if (!draft) return
     if (draft.a === '' || draft.b === '') {
       setError('Enter a score for both sides.')
@@ -59,7 +81,12 @@ export default function ScoreDialog({
     }
     try {
       const entries = getScoreEntries(match, session)
-      entries[entries.length - 1] = { ...entries.at(-1)!, a: Number(draft.a), b: Number(draft.b) }
+      entries[entries.length - 1] = {
+        ...entries.at(-1)!,
+        a: Number(draft.a),
+        b: Number(draft.b),
+        ...(clearCurrentCredits ? { credits: {} } : {}),
+      }
       const changed = adjustMatchScores(match, session, entries)
       commit((current) => {
         if (current.matches.find((m) => m.id === match.id)?.revision !== draft.revision)
@@ -79,7 +106,7 @@ export default function ScoreDialog({
     }
   }
   const finish = () => {
-    if (draft || editor) return
+    if (draft || editor || courtEditing) return
     commit((current) => ({
       ...current,
       matches: current.matches.map((m) =>
@@ -125,7 +152,7 @@ export default function ScoreDialog({
           <select
             aria-label="Doubles point entry mode"
             value={mode}
-            disabled={!editable || Boolean(draft) || editor}
+            disabled={!editable || Boolean(draft) || editor || courtEditing}
             onChange={(event) => {
               const scoringMode = event.target.value as 'team' | 'individual' | 'combined'
               commit((current) => ({
@@ -140,9 +167,14 @@ export default function ScoreDialog({
             <option value="individual">Player credits</option>
             <option value="combined">Team + player credits</option>
           </select>
-          <small>Previously unassigned points stay unassigned.</small>
         </label>
       )}
+      <ServiceCourt
+        match={match}
+        session={session}
+        disabled={!editable || Boolean(draft) || editor}
+        onEditingChange={setCourtEditing}
+      />
       <div className="scoreboard scoring-enhanced">
         {(['A', 'B'] as const).map((side) => {
           const ids = side === 'A' ? match.teamA : match.teamB
@@ -154,11 +186,6 @@ export default function ScoreDialog({
               key={side}
               aria-label={`Side ${side}`}
             >
-              <div className="score-side-avatars">
-                {ids.map((id, i) => (
-                  <Avatar key={id} name={name(id)} index={side === 'A' ? i : i + 2} />
-                ))}
-              </div>
               <span className="score-side-label">
                 SIDE {side}
                 {score.complete && score.winner === side ? ' · LEADING RESULT' : ''}
@@ -177,7 +204,17 @@ export default function ScoreDialog({
                   step="1"
                   aria-label={`Side ${side} score ${value}`}
                   value={draft ? draft[side === 'A' ? 'a' : 'b'] : value}
-                  disabled={!editable || editor}
+                  disabled={!editable || editor || courtEditing}
+                  onFocus={(event) => event.currentTarget.select()}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' && draft) applyDirect()
+                    if (event.key === 'Escape' && draft) {
+                      event.preventDefault()
+                      event.stopPropagation()
+                      setDraft(null)
+                      setError('')
+                    }
+                  }}
                   onChange={(e) => {
                     setError('')
                     const key = side === 'A' ? 'a' : 'b'
@@ -195,45 +232,67 @@ export default function ScoreDialog({
               <span className="score-tap-hint">
                 <PencilLine size={11} /> Tap score to edit
               </span>
-              {(mode !== 'individual' || session.format !== 'doubles') && (
+              <div className="score-counter-controls">
+                <button
+                  className="button score-subtract"
+                  aria-label={`Remove point from side ${side}`}
+                  disabled={!editable || value <= 0 || Boolean(draft) || editor || courtEditing}
+                  onClick={() => subtractPoint(side)}
+                >
+                  <Minus size={20} />
+                </button>
                 <button
                   className="button score-add"
                   aria-label={`Point to side ${side}`}
-                  disabled={!editable || score.complete || Boolean(draft) || editor}
+                  title={
+                    mode === 'individual' && session.format === 'doubles'
+                      ? 'Add an unassigned team point'
+                      : 'Add one point'
+                  }
+                  disabled={!editable || score.complete || Boolean(draft) || editor || courtEditing}
                   onClick={() => addPoint(side)}
                 >
-                  <Plus size={20} /> Point
+                  <Plus size={20} />{' '}
+                  {mode === 'individual' && session.format === 'doubles' ? 'Team' : 'Point'}
                 </button>
-              )}
+              </div>
               {session.format === 'doubles' && mode !== 'team' && (
                 <div className="individual-score-controls">
                   {ids.map((id) => (
-                    <button
-                      key={id}
-                      type="button"
-                      className="individual-point"
-                      disabled={!editable || score.complete || Boolean(draft) || editor}
-                      onClick={() => addPoint(side, id)}
-                      aria-label={`Point to ${name(id)}`}
-                    >
-                      <span>{name(id)}</span>
-                      <strong>{score.credits[id] ?? 0}</strong>
-                      <Plus size={15} />
-                    </button>
+                    <div className="individual-point-row" key={id}>
+                      <button
+                        type="button"
+                        className="individual-remove"
+                        disabled={
+                          !editable ||
+                          !(score.credits[id] > 0) ||
+                          Boolean(draft) ||
+                          editor ||
+                          courtEditing
+                        }
+                        onClick={() => subtractPoint(side, id)}
+                        aria-label={`Remove point from ${name(id)}`}
+                      >
+                        <Minus size={15} />
+                      </button>
+                      <button
+                        type="button"
+                        className="individual-point"
+                        disabled={
+                          !editable || score.complete || Boolean(draft) || editor || courtEditing
+                        }
+                        onClick={() => addPoint(side, id)}
+                        aria-label={`Point to ${name(id)}`}
+                      >
+                        <span>{name(id)}</span>
+                        <strong>{score.credits[id] ?? 0}</strong>
+                        <Plus size={15} />
+                      </button>
+                    </div>
                   ))}
                   <span className="unassigned-score">
                     {Math.max(0, value - credited)} unassigned points
                   </span>
-                  {mode === 'individual' && (
-                    <button
-                      type="button"
-                      className="text-button"
-                      disabled={!editable || score.complete || Boolean(draft) || editor}
-                      onClick={() => addPoint(side)}
-                    >
-                      + Team / unassigned
-                    </button>
-                  )}
                 </div>
               )}
             </section>
@@ -255,7 +314,7 @@ export default function ScoreDialog({
           >
             Cancel edit
           </button>
-          <button className="button primary" onClick={applyDirect} disabled={!editable}>
+          <button className="button primary" onClick={() => applyDirect()} disabled={!editable}>
             Apply score <Check size={15} />
           </button>
         </div>
@@ -263,6 +322,11 @@ export default function ScoreDialog({
       {error && (
         <div className="score-editor-error" role="alert">
           {error}
+          {draft && error.includes('credits exceed') && (
+            <button className="text-button" onClick={() => applyDirect(true)}>
+              Apply totals with this game’s player credits unassigned
+            </button>
+          )}
           <button
             className="text-button"
             onClick={() => {
@@ -307,7 +371,9 @@ export default function ScoreDialog({
           </div>
           <button
             className="button primary"
-            disabled={readOnly || Boolean(draft) || editor || match.status === 'abandoned'}
+            disabled={
+              readOnly || Boolean(draft) || editor || courtEditing || match.status === 'abandoned'
+            }
             onClick={() => (match.status === 'completed' ? setEditor(true) : finish())}
           >
             {match.status === 'completed' ? 'Correct result' : 'Confirm result'} <Check size={17} />
@@ -317,14 +383,16 @@ export default function ScoreDialog({
         <p className="score-help" aria-live="polite">
           {session.format === 'doubles' && mode !== 'team'
             ? 'Player credits add to the side total. Unassigned points remain separate.'
-            : 'Tap + for a rally, or tap a score to correct it directly.'}
+            : 'Tap + or − for a rally, or type a score to correct it directly.'}
         </p>
       )}
       {match.status === 'playing' && (
         <div className="score-tools">
           <button
             className="button ghost"
-            disabled={!editable || !canUndoScore(match, session) || Boolean(draft) || editor}
+            disabled={
+              !editable || !canUndoScore(match, session) || Boolean(draft) || editor || courtEditing
+            }
             onClick={() => addPoint()}
           >
             <RotateCcw size={16} /> Undo last action
@@ -332,7 +400,7 @@ export default function ScoreDialog({
           <button
             className="button ghost"
             aria-expanded={editor}
-            disabled={!editable || Boolean(draft)}
+            disabled={!editable || Boolean(draft) || courtEditing}
             onClick={() => setEditor(!editor)}
           >
             <PencilLine size={15} />

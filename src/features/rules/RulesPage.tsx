@@ -1,4 +1,4 @@
-import { useId, useMemo, useState } from 'react'
+import { useEffect, useId, useMemo, useState } from 'react'
 import {
   ArrowDownRight,
   ArrowRight,
@@ -9,6 +9,8 @@ import {
   ExternalLink,
   Minus,
   Plus,
+  Pause,
+  Play,
   RotateCcw,
   Search,
   Sparkles,
@@ -176,17 +178,102 @@ const rules: Rule[] = [
   },
 ]
 
+type DemoSide = 'A' | 'B'
+const exampleRallies: DemoSide[] = ['A', 'B', 'B', 'A']
+
+function demoSequence(winners: DemoSide[]) {
+  let serving: DemoSide = 'A'
+  let a = 0
+  let b = 0
+  const right = { A: 'A1', B: 'B1' }
+  for (const winner of winners) {
+    if (winner === 'A') a++
+    else b++
+    if (winner === serving)
+      right[winner] = right[winner].endsWith('1') ? `${winner}2` : `${winner}1`
+    serving = winner
+  }
+  return { a, b, serving, right }
+}
+
 function CourtExplainer() {
   const [format, setFormat] = useState<'singles' | 'doubles'>('doubles')
-  const [score, setScore] = useState(0)
+  const [winners, setWinners] = useState<DemoSide[]>([])
+  const [boundary, setBoundary] = useState<'service' | 'rally'>('service')
+  const [lessonStep, setLessonStep] = useState(0)
+  const [playing, setPlaying] = useState(false)
   const id = useId().replace(/:/g, '')
+  const state = demoSequence(winners)
+  const score = state.serving === 'A' ? state.a : state.b
   const even = score % 2 === 0
-  const serverY = even ? 225 : 115
-  const receiverY = even ? 115 : 225
+  const receiving: DemoSide = state.serving === 'A' ? 'B' : 'A'
+  const serviceCourt = even ? 'right' : 'left'
+  const courtPosition = (player: string): 'right' | 'left' =>
+    state.right[player[0] as DemoSide] === player ? 'right' : 'left'
+  const playerY = (player: string) => {
+    const side = player[0] as DemoSide
+    const right = format === 'singles' ? even : courtPosition(player) === 'right'
+    return side === 'A' ? (right ? 225 : 115) : right ? 115 : 225
+  }
+  const serverId =
+    format === 'singles'
+      ? `${state.serving}1`
+      : [
+          state.right[state.serving],
+          `${state.serving}${state.right[state.serving].endsWith('1') ? '2' : '1'}`,
+        ][even ? 0 : 1]
+  const receiverId =
+    format === 'singles'
+      ? `${receiving}1`
+      : [state.right[receiving], `${receiving}${state.right[receiving].endsWith('1') ? '2' : '1'}`][
+          even ? 0 : 1
+        ]
+  const serverX = state.serving === 'A' ? 125 : 395
+  const receiverX = state.serving === 'A' ? 395 : 125
+  const serverY = playerY(serverId)
+  const receiverY = playerY(receiverId)
   const sideTop = format === 'singles' ? 80 : 60
   const sideBottom = format === 'singles' ? 260 : 280
   const leftBack = format === 'singles' ? 52 : 76
   const rightBack = format === 'singles' ? 468 : 444
+  const lastWinner = winners.at(-1)
+  const priorServing = winners.length > 1 ? winners.at(-2)! : 'A'
+  const keptServe = lastWinner === priorServing
+  const explanation = !lastWinner
+    ? 'Start at 0–0. A1 serves from the right; B1 receives diagonally opposite.'
+    : format === 'singles'
+      ? `${serverId} serves from the ${serviceCourt}. The receiver stands diagonally opposite.`
+      : keptServe
+        ? `Side ${lastWinner} won while serving. Only ${lastWinner}1 and ${lastWinner}2 swap. Side ${receiving} stays in place; ${serverId} serves again.`
+        : `Side ${lastWinner} won while receiving. Nobody swaps. ${serverId} now serves from the ${serviceCourt}.`
+
+  useEffect(() => {
+    if (!playing) return
+    const timer = window.setTimeout(() => {
+      const next = lessonStep + 1
+      setWinners(exampleRallies.slice(0, next))
+      setLessonStep(next)
+      if (next === exampleRallies.length) setPlaying(false)
+    }, 2600)
+    return () => window.clearTimeout(timer)
+  }, [playing, lessonStep])
+
+  const award = (winner: DemoSide) => {
+    setPlaying(false)
+    setLessonStep(0)
+    setWinners((current) => [...current, winner])
+  }
+  const reset = () => {
+    setWinners([])
+    setLessonStep(0)
+    setPlaying(false)
+  }
+  const nextExample = () => {
+    setPlaying(false)
+    const next = lessonStep >= exampleRallies.length ? 1 : lessonStep + 1
+    setLessonStep(next)
+    setWinners(exampleRallies.slice(0, next))
+  }
   return (
     <section className="rules-explainer" aria-labelledby="service-heading">
       <div className="rules-explainer-content">
@@ -195,8 +282,8 @@ function CourtExplainer() {
         </span>
         <h2 id="service-heading">Serving, made simple.</h2>
         <p>
-          A little movement makes the rules click. Change the score and follow the highlighted
-          service courts.
+          Follow the same named players through each rally. A highlight changes who serves; only the
+          correct partners move.
         </p>
         <div className="rules-mode" role="group" aria-label="Court format">
           {(['singles', 'doubles'] as const).map((value) => (
@@ -210,76 +297,39 @@ function CourtExplainer() {
             </button>
           ))}
         </div>
-        <div className="rules-score-control">
-          <span>Serving side’s score</span>
-          <div className="rules-score-stepper">
-            <button
-              type="button"
-              aria-label="Decrease serving score"
-              disabled={score === 0}
-              onClick={() => setScore((s) => s - 1)}
-            >
-              <Minus size={17} />
-            </button>
-            <output aria-label="Serving score">{score}</output>
-            <button
-              type="button"
-              aria-label="Increase serving score"
-              disabled={score === 30}
-              onClick={() => setScore((s) => s + 1)}
-            >
-              <Plus size={17} />
-            </button>
-          </div>
-        </div>
-        <div className="rules-service-answer" aria-live="polite">
-          <Check size={17} aria-hidden="true" />
-          <span>
-            <strong>{even ? 'Even score → right court' : 'Odd score → left court'}</strong>
-            <br />
-            Serve diagonally into the highlighted receiving court.
-          </span>
-        </div>
-        <div className="rules-demo-actions">
-          <button
-            className="rules-next"
-            type="button"
-            disabled={score === 30}
-            onClick={() => setScore((s) => s + 1)}
-          >
-            Point to serving side <ArrowRight size={16} />
-          </button>
-          <button
-            className="rules-reset"
-            type="button"
-            aria-label="Reset service demonstration"
-            onClick={() => setScore(0)}
-          >
-            <RotateCcw size={17} />
-          </button>
-        </div>
-        <p className="rules-demo-note">
-          Court-position illustration. Doubles server identity also depends on the previous rally
-          sequence.
-        </p>
       </div>
       <div className="rules-court-wrap">
         <div className="rules-court-label">
-          <span className="rules-live-dot" /> INTERACTIVE COURT <span>{format}</span>
+          <span className="rules-live-dot" /> NEXT SERVE <span>{format}</span>
+        </div>
+        <div
+          className="rules-match-score"
+          aria-label={`Demonstration score: Side A ${state.a}, Side B ${state.b}`}
+        >
+          <span className={state.serving === 'A' ? 'is-serving' : ''}>
+            A <strong>{state.a}</strong>
+          </span>
+          <span aria-hidden="true">–</span>
+          <span className={state.serving === 'B' ? 'is-serving' : ''}>
+            B <strong>{state.b}</strong>
+          </span>
         </div>
         <svg
           className="rules-court"
           viewBox="0 0 520 340"
           role="img"
-          aria-labelledby={`${id}-title ${id}-desc`}
+          aria-labelledby={`${id}-title`}
+          aria-describedby={`${id}-desc`}
         >
           <title id={`${id}-title`}>
             {format} service court at a score of {score}
           </title>
           <desc id={`${id}-desc`}>
-            The server on the left serves from the {even ? 'right' : 'left'} service court
-            diagonally to the receiver on the right. Highlighted areas show the correct service
-            courts.
+            {serverId} serves from the {serviceCourt} service court to {receiverId} diagonally
+            opposite. {explanation}{' '}
+            {boundary === 'rally'
+              ? 'The outline shows the full legal rally court.'
+              : 'Highlighted areas show the service courts.'}
           </desc>
           <defs>
             <pattern id={`${id}-grid`} width="20" height="20" patternUnits="userSpaceOnUse">
@@ -298,24 +348,40 @@ function CourtExplainer() {
           </defs>
           <rect width="520" height="340" fill={`url(#${id}-grid)`} />
           <rect x="52" y="60" width="416" height="220" rx="1" fill="#24463e" />
-          <rect
-            className="rules-highlight"
-            x={leftBack}
-            y={even ? 170 : sideTop}
-            width={194 - leftBack}
-            height={even ? sideBottom - 170 : 170 - sideTop}
-            fill="#d9f96c"
-            fillOpacity=".24"
-          />
-          <rect
-            className="rules-highlight"
-            x="326"
-            y={even ? sideTop : 170}
-            width={rightBack - 326}
-            height={even ? 170 - sideTop : sideBottom - 170}
-            fill="#d9f96c"
-            fillOpacity=".24"
-          />
+          {boundary === 'service' ? (
+            <>
+              <rect
+                className="rules-highlight"
+                x={leftBack}
+                y={even ? 170 : sideTop}
+                width={194 - leftBack}
+                height={even ? sideBottom - 170 : 170 - sideTop}
+                fill="#d9f96c"
+                fillOpacity=".24"
+              />
+              <rect
+                className="rules-highlight"
+                x="326"
+                y={even ? sideTop : 170}
+                width={rightBack - 326}
+                height={even ? 170 - sideTop : sideBottom - 170}
+                fill="#d9f96c"
+                fillOpacity=".24"
+              />
+            </>
+          ) : (
+            <rect
+              className="rules-rally-area"
+              x="52"
+              y={sideTop}
+              width="416"
+              height={sideBottom - sideTop}
+              fill="#d9f96c"
+              fillOpacity=".1"
+              stroke="#d9f96c"
+              strokeWidth="3"
+            />
+          )}
           <g fill="none" stroke="#e8f4df" strokeWidth="1.7" strokeOpacity=".72">
             <rect x="52" y="60" width="416" height="220" />
             <path d="M52 80H468 M52 260H468 M76 60V280 M444 60V280 M194 60V280 M326 60V280 M52 170H194 M326 170H468" />
@@ -337,59 +403,73 @@ function CourtExplainer() {
             NET
           </text>
           <text x="126" y="310" textAnchor="middle" className="rules-svg-label">
-            SERVING SIDE
+            SIDE A
           </text>
           <text x="395" y="310" textAnchor="middle" className="rules-svg-label">
-            RECEIVING SIDE
+            SIDE B
           </text>
-          {format === 'doubles' && (
-            <g
-              className="rules-court-player"
-              style={{ transform: `translate(125px, ${receiverY}px)` }}
-            >
-              <circle r="15" fill="#517365" stroke="#a2bcaa" />
-              <text y="4" textAnchor="middle" className="rules-player-letter">
-                P
-              </text>
-            </g>
+          <text x="73" y="151" className="rules-own-court-label">
+            L
+          </text>
+          <text x="73" y="195" className="rules-own-court-label">
+            R
+          </text>
+          <text x="444" y="151" className="rules-own-court-label">
+            R
+          </text>
+          <text x="444" y="195" className="rules-own-court-label">
+            L
+          </text>
+          {boundary === 'service' && (
+            <path
+              className="rules-shuttle-path"
+              key={`${format}-${state.serving}-${even}`}
+              d={`M${serverX + (state.serving === 'A' ? 24 : -24)} ${serverY} Q260 ${even ? 130 : 210} ${receiverX + (state.serving === 'A' ? -24 : 24)} ${receiverY}`}
+              fill="none"
+              stroke="#d9f96c"
+              strokeWidth="2"
+              strokeDasharray="5 6"
+              markerEnd={`url(#${id}-arrow)`}
+            />
           )}
-          {format === 'doubles' && (
-            <g
-              className="rules-court-player"
-              style={{ transform: `translate(395px, ${serverY}px)` }}
-            >
-              <circle r="15" fill="#517365" stroke="#a2bcaa" />
-              <text y="4" textAnchor="middle" className="rules-player-letter">
-                P
-              </text>
-            </g>
-          )}
-          <path
-            className="rules-shuttle-path"
-            key={`${format}-${even}`}
-            d={`M148 ${serverY} Q260 ${even ? 130 : 210} 371 ${receiverY}`}
-            fill="none"
-            stroke="#d9f96c"
-            strokeWidth="2"
-            strokeDasharray="5 6"
-            markerEnd={`url(#${id}-arrow)`}
-          />
-          <g className="rules-court-player" style={{ transform: `translate(125px, ${serverY}px)` }}>
-            <circle className="rules-server-halo" r="24" fill="#d9f96c" fillOpacity=".12" />
-            <circle r="16" fill="#d9f96c" />
-            <text y="5" textAnchor="middle" className="rules-player-letter rules-player-server">
-              S
-            </text>
-          </g>
-          <g
-            className="rules-court-player"
-            style={{ transform: `translate(395px, ${receiverY}px)` }}
-          >
-            <circle r="16" fill="#f4f7ed" />
-            <text y="5" textAnchor="middle" className="rules-player-letter rules-player-server">
-              R
-            </text>
-          </g>
+          {(format === 'doubles' ? ['A1', 'A2', 'B1', 'B2'] : ['A1', 'B1']).map((player) => {
+            const serving = player === serverId
+            const receives = player === receiverId
+            return (
+              <g
+                key={player}
+                className="rules-court-player"
+                data-player={player}
+                data-position={format === 'singles' ? serviceCourt : courtPosition(player)}
+                data-role={serving ? 'server' : receives ? 'receiver' : 'partner'}
+                style={{
+                  transform: `translate(${player.startsWith('A') ? 125 : 395}px, ${playerY(player)}px)`,
+                }}
+              >
+                <title>
+                  {player} · {serving ? 'Server' : receives ? 'Receiver' : 'Partner'} ·{' '}
+                  {format === 'singles' ? serviceCourt : courtPosition(player)} service court
+                </title>
+                {serving && (
+                  <circle className="rules-server-halo" r="27" fill="#d9f96c" fillOpacity=".15" />
+                )}
+                <circle
+                  r="19"
+                  fill={serving ? '#d9f96c' : player.startsWith('A') ? '#9cbcae' : '#d1c3e7'}
+                  stroke={serving ? '#d9f96c' : receives ? '#fff' : '#203e36'}
+                  strokeWidth={receives ? '3' : '1.5'}
+                />
+                <text y="4" textAnchor="middle" className="rules-player-letter rules-player-server">
+                  {player}
+                </text>
+                {serving && (
+                  <text y="-34" textAnchor="middle" className="rules-server-caption">
+                    SERVE
+                  </text>
+                )}
+              </g>
+            )
+          })}
         </svg>
         <div className="rules-court-key">
           <span>
@@ -398,13 +478,141 @@ function CourtExplainer() {
           </span>
           <span>
             <i className="rules-key-receiver" />
-            Receiver
+            Receiver ring
           </span>
+          <span>R / L = facing the net</span>
+        </div>
+        <div
+          className="rules-boundary-toggle"
+          role="group"
+          aria-label="Court boundary demonstration"
+        >
+          <button
+            type="button"
+            aria-pressed={boundary === 'service'}
+            onClick={() => setBoundary('service')}
+          >
+            Serve lines
+          </button>
+          <button
+            type="button"
+            aria-pressed={boundary === 'rally'}
+            onClick={() => setBoundary('rally')}
+          >
+            Rally lines
+          </button>
+        </div>
+        <p className="rules-boundary-note" aria-live="polite">
+          {boundary === 'service'
+            ? format === 'doubles'
+              ? 'Doubles serve: wide sidelines, inner back service line.'
+              : 'Singles serve: narrow sidelines, full back line.'
+            : format === 'doubles'
+              ? 'After the return: the full wide, long court is in play.'
+              : 'After the return: the full length, narrow court is in play.'}
+        </p>
+      </div>
+      <div className="rules-explainer-controls">
+        <div className="rules-score-control">
           <span>
-            <i className="rules-key-area" />
-            Service area
+            Serving side’s score{' '}
+            <strong className="rules-serving-side">Side {state.serving}</strong>
+          </span>
+          <div className="rules-score-stepper">
+            <button
+              type="button"
+              aria-label="Decrease serving score"
+              title="Undo the last demonstrated rally"
+              disabled={!winners.length}
+              onClick={() => {
+                setPlaying(false)
+                setLessonStep(0)
+                setWinners((current) => current.slice(0, -1))
+              }}
+            >
+              <Minus size={17} />
+            </button>
+            <output aria-label="Serving score">{score}</output>
+            <button
+              type="button"
+              aria-label="Increase serving score"
+              disabled={score === 30}
+              onClick={() => award(state.serving)}
+            >
+              <Plus size={17} />
+            </button>
+          </div>
+        </div>
+        <div className="rules-service-answer" aria-live="polite" aria-atomic="true">
+          <Check size={17} aria-hidden="true" />
+          <span>
+            <strong>{even ? 'Even score → right court' : 'Odd score → left court'}</strong>
+            <br />
+            {explanation}
           </span>
         </div>
+        <div className="rules-demo-actions">
+          <button
+            className="rules-next"
+            type="button"
+            disabled={score === 30}
+            onClick={() => award(state.serving)}
+          >
+            Point to serving side <ArrowRight size={16} />
+          </button>
+          <button
+            className="rules-reset"
+            type="button"
+            aria-label="Reset service demonstration"
+            onClick={reset}
+          >
+            <RotateCcw size={17} />
+          </button>
+        </div>
+        <button
+          className="rules-side-out"
+          type="button"
+          disabled={(receiving === 'A' ? state.a : state.b) === 30}
+          onClick={() => award(receiving)}
+        >
+          Point to receiving side <ArrowRight size={15} />
+        </button>
+        <details
+          className="rules-guided-example"
+          onToggle={(event) => {
+            if (!event.currentTarget.open) setPlaying(false)
+          }}
+        >
+          <summary>Watch a four-rally example</summary>
+          <div className="rules-example-controls">
+            <button
+              type="button"
+              onClick={() => {
+                if (playing) setPlaying(false)
+                else {
+                  if (lessonStep >= exampleRallies.length || lessonStep === 0) {
+                    setWinners([])
+                    setLessonStep(0)
+                  }
+                  setPlaying(true)
+                }
+              }}
+              aria-label={playing ? 'Pause rally example' : 'Play rally example'}
+            >
+              {playing ? <Pause size={15} /> : <Play size={15} />}
+              {playing ? 'Pause' : 'Play'}
+            </button>
+            <button type="button" onClick={nextExample}>
+              Next rally <ArrowRight size={15} />
+            </button>
+            <span aria-live="polite">{lessonStep} / 4</span>
+          </div>
+          <p>A wins → B wins → B wins → A wins. Watch who stays still when service changes.</p>
+        </details>
+        <p className="rules-demo-note">
+          These are positions for the next serve. After the return, players can move freely on their
+          side.
+        </p>
       </div>
     </section>
   )

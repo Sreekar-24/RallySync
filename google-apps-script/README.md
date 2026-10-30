@@ -29,7 +29,7 @@ editable to work around it.
 
 ## Upgrade an existing deployment
 
-This release writes **snapshot version 2**, adding whole-session schedules, availability windows, player-attributed points, and direct score adjustments. Existing version-1 backups and stored snapshots migrate without changing results or inventing individual contributions.
+This release writes **snapshot version 2**, including whole-session schedules, availability windows, player-attributed points, direct score adjustments, service-position checkpoints, and point retractions. Existing version-1 backups and stored snapshots migrate without changing results or inventing individual contributions. If you already deployed the v0.2 script, redeploy again for the new optional serving/retraction fields; the older strict validator rejects them safely.
 
 Replace the Apps Script source with this version and publish a **new deployment version** before enabling Sheets synchronization in the updated app. Running `setup()` again preserves the spreadsheet. Update every organizer/viewer to the new web app before editing; old clients deliberately reject v2 snapshots rather than silently losing new fields. An old deployed script rejects v2 uploads, so local scores remain safe but synchronization reports an error until the script is upgraded.
 

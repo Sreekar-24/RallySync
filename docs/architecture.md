@@ -4,11 +4,19 @@
 
 The UI updates a typed AppData snapshot through one store. Every accepted UI change is queued into IndexedDB in order. A synchronous localStorage write-ahead journal protects the latest pending action from an immediate reload; committed journal entries are cleared without removing newer pending changes. A storage failure is visible and prompts a backup; it is not reported as a successful save. Browser Web Locks guard same-origin editing when supported.
 
-Players have stable IDs independent of display names. Sessions record rules and attendance changes. Matches record sides, court, timestamps, revisions, and immutable point/undo/adjustment actions. `scoreMatch` replays accepted operations; duplicate operation IDs are ignored. Explicit match finalization makes a result eligible for statistics.
+Players have stable IDs independent of display names. Sessions record rules and attendance changes. Matches record sides, court, timestamps, revisions, and immutable point/undo/adjustment/retraction actions. `scoreMatch` replays accepted operations; duplicate operation IDs are ignored. Explicit match finalization makes a result eligible for statistics.
 
 Direct score edits append a validated game-score snapshot with optional player-credit allocation. Undo restores the previous effective operation atomically. Live adjustments remain provisional; explicit confirmation records a competitive result. Historical corrections replace the accepted result without creating another match. Legacy synthetic rally sequences remain readable but do not establish observed rally order. Attribution is preserved only where explicitly recorded; unknown points are unassigned.
 
 Version-1 snapshots migrate into version 2, including removal of a known legacy recommendation-description field accidentally spread into old match objects. New schemas reject unsupported fields instead of silently stripping them. Demo mode has a separate in-memory dataset: neither the IndexedDB queue, local recovery journal, nor Sheets accepts demo writes. Destructive real-data operations have scoped previews and backup controls.
+
+## Service tracking and appearance
+
+Serving is deterministic replay, not inferred from total scores. An optional per-match checkpoint records confirmed right/left occupants, serving side, physical end, current game/score, and an action anchor. Later surviving observed rallies swap only a winning serving pair; receiving wins change the serving side without swapping players. Both singles players use the serving score's parity. The mirrored court separates logical own-right/left from physical screen coordinates.
+
+Minus retracts the latest eligible point for a side/player in the displayed game. A retraction preserves the other rally order and individual credits; undo restores the whole operation. Typed totals or unavailable rally history require a numeric correction instead. Corrections, synthetic legacy rallies, or removal/undo before a checkpoint invalidate service certainty. A new game requires a fresh server selection; the prior winning side has first service. Standard 21-point best-of-three end changes preserve logical positions and service order.
+
+Light/Dark/High contrast/System preferences live outside the shared score snapshot. A local appearance provider follows media/storage changes; CSS tokens theme new components and semantic overrides adapt existing screens. Native radio controls, visible focus, text labels alongside serving colors, and reduced-motion media queries support keyboard and motion-sensitive use. Themes remain adjustable in demo/viewer modes without changing scores or sync state.
 
 ## Scheduling
 
@@ -35,6 +43,8 @@ Google Sheets synchronization is opt-in and uses full snapshots with optimistic 
 The organizer is the authoritative writer. Viewers replace their local shared view from accepted snapshots. Conflicting local/shared edits pause automatic progress and require a backed-up, explicit resolution. This design does not claim reliable concurrent offline scoring by several organizers.
 
 Apps Script mocks verify storage integrity and conflict behavior. A real deployment is still required to validate Google permissions, quotas, redirects, and browser cross-origin access. The optional anonymous endpoint has no genuine role enforcement.
+
+Optional service checkpoints and retraction actions remain additive schema-v2 fields, with strict client/script validation. Existing local data needs no destructive migration. Deploy the updated script before synchronizing these fields; older strict clients/scripts reject unfamiliar fields, preventing silent loss.
 
 ## Validation
 

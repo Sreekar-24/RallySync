@@ -1,6 +1,7 @@
 import Dexie, { type EntityTable } from 'dexie'
 import { z } from 'zod'
 import type { AppData } from '../domain/model'
+import { getScoreEntries, scoreMatch } from '../domain/engine'
 
 const id = z.string().min(1).max(128)
 const time = z.number().finite().nonnegative().max(8.64e15)
@@ -91,11 +92,12 @@ const sessionSchema = z
 const actionSchema = z
   .object({
     id,
-    kind: z.enum(['point', 'undo', 'adjust']),
+    kind: z.enum(['point', 'undo', 'adjust', 'remove']),
     side: z.enum(['A', 'B']).optional(),
     playerId: id.optional(),
     scores: z.array(scoreEntrySchema).min(1).max(3).optional(),
     synthetic: z.boolean().optional(),
+    targetId: id.optional(),
     at: time,
   })
   .strict()
@@ -112,6 +114,21 @@ const matchSchema = z
     actions: z.array(actionSchema).max(20000),
     revision: z.number().int().nonnegative(),
     planSlotId: id.optional(),
+    serviceSetup: z
+      .object({
+        game: z.number().int().min(1).max(3),
+        a: z.number().int().min(0).max(199),
+        b: z.number().int().min(0).max(199),
+        afterActionId: id.optional(),
+        positions: z
+          .object({ A: z.array(id).min(1).max(2), B: z.array(id).min(1).max(2) })
+          .strict(),
+        servingSide: z.enum(['A', 'B']),
+        nearSide: z.enum(['A', 'B']),
+        at: time,
+      })
+      .strict()
+      .optional(),
   })
   .strict()
 const dataSchema = z
@@ -242,7 +259,15 @@ export function validateData(input: unknown): AppData {
     if (m.endedAt !== undefined && m.endedAt < m.startedAt)
       throw new Error('A match cannot end before it starts.')
     if (!unique(m.actions.map((a) => a.id))) throw new Error('Invalid scoring events.')
+    const earlierActions = new Map<string, (typeof m.actions)[number]>()
     for (const action of m.actions) {
+      if (action.kind === 'remove') {
+        const target = action.targetId ? earlierActions.get(action.targetId) : undefined
+        if (!target || target.kind !== 'point' || action.side !== target.side)
+          throw new Error('A removed point must reference an earlier rally on the same side.')
+      } else if (action.targetId !== undefined)
+        throw new Error('Only a removed point can reference a rally.')
+      earlierActions.set(action.id, action)
       if (action.playerId !== undefined && action.kind !== 'point')
         throw new Error('Player credit is only valid on a point event.')
       if (
@@ -290,6 +315,37 @@ export function validateData(input: unknown): AppData {
             throw new Error('Player credits exceed the side score.')
         }
       }
+    }
+    if (m.serviceSetup) {
+      const setup = m.serviceSetup
+      for (const side of ['A', 'B'] as const) {
+        const team = side === 'A' ? m.teamA : m.teamB
+        const positions = setup.positions[side]
+        if (
+          positions.length !== team.length ||
+          !unique(positions) ||
+          positions.some((id) => !team.includes(id))
+        )
+          throw new Error('Invalid serving positions.')
+      }
+      const anchor =
+        setup.afterActionId === undefined
+          ? -1
+          : m.actions.findIndex((action) => action.id === setup.afterActionId)
+      if ((setup.afterActionId !== undefined && anchor < 0) || setup.game > s.bestOf)
+        throw new Error('Invalid serving checkpoint reference.')
+      const baseline = getScoreEntries({ ...m, actions: m.actions.slice(0, anchor + 1) }, s)
+      if (
+        baseline.length !== setup.game ||
+        baseline.at(-1)!.a !== setup.a ||
+        baseline.at(-1)!.b !== setup.b
+      )
+        throw new Error('Serving checkpoint does not match its recorded score.')
+      const previousWinner = scoreMatch({ ...m, actions: m.actions.slice(0, anchor + 1) }, s).games[
+        setup.game - 2
+      ]?.winner
+      if (setup.a === 0 && setup.b === 0 && previousWinner && setup.servingSide !== previousWinner)
+        throw new Error('The previous game winner serves first in the next game.')
     }
     if (m.planSlotId) {
       const slot = s.plan?.slots.find((slot) => slot.id === m.planSlotId)

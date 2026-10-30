@@ -481,3 +481,81 @@ describe('v2 migration and planning/credit records', () => {
     expect(() => validateData(data)).toThrow()
   })
 })
+
+describe('serving and point-removal backups', () => {
+  it('preserves current-score position checkpoints, plus, minus, and undo history', async () => {
+    const { configureService, getServiceState } = await import('../domain/serving')
+    const { removePoint } = await import('../domain/engine')
+    const input = fixture()
+    input.matches[0] = configureService(
+      input.matches[0],
+      input.sessions[0],
+      {
+        positions: { A: ['p1', 'p0'], B: ['p2', 'p3'] },
+        servingSide: 'B',
+        nearSide: 'B',
+      },
+      at + 2000,
+    )
+    input.matches[0] = removePoint(input.matches[0], input.sessions[0], 'A', undefined, at + 3000)
+    const parsed = validateData(input)
+    expect(parsed).toEqual(input)
+    expect(getServiceState(parsed.matches[0], parsed.sessions[0]).status).toBe('check')
+  })
+
+  it('rejects invalid position ownership, action anchors, and score checkpoints', async () => {
+    const { configureService } = await import('../domain/serving')
+    const mutations = [
+      (input: AppData) => {
+        input.matches[0].serviceSetup!.positions.A = ['p0', 'p2']
+      },
+      (input: AppData) => {
+        input.matches[0].serviceSetup!.positions.B = ['p2', 'p2']
+      },
+      (input: AppData) => {
+        input.matches[0].serviceSetup!.afterActionId = 'missing'
+      },
+      (input: AppData) => {
+        input.matches[0].serviceSetup!.a = 9
+      },
+      (input: AppData) => {
+        input.matches[0].serviceSetup!.game = 2
+      },
+    ]
+    for (const mutation of mutations) {
+      const input = fixture()
+      input.matches[0] = configureService(input.matches[0], input.sessions[0], {
+        positions: { A: ['p0', 'p1'], B: ['p2', 'p3'] },
+        servingSide: 'A',
+      })
+      mutation(input)
+      expect(() => validateData(input)).toThrow()
+    }
+  })
+
+  it('rejects removal events targeting unknown, future, non-rally, or wrong-side events', () => {
+    for (const targetId of ['missing', 'future', 'remove']) {
+      const input = fixture()
+      input.matches[0].actions.push(
+        { id: 'remove', kind: 'remove', side: 'A', targetId, at: at + 2000 },
+        { id: 'future', kind: 'point', side: 'A', at: at + 3000 },
+      )
+      expect(() => validateData(input)).toThrow('earlier rally')
+    }
+    const wrongSide = fixture()
+    wrongSide.matches[0].actions.push({
+      id: 'remove',
+      kind: 'remove',
+      side: 'B',
+      targetId: 'point',
+      at: at + 2000,
+    })
+    expect(() => validateData(wrongSide)).toThrow('same side')
+    const nonRally = fixture()
+    nonRally.matches[0].actions.push(
+      { id: 'undo', kind: 'undo', at: at + 1000 },
+      { id: 'remove', kind: 'remove', side: 'A', targetId: 'undo', at: at + 2000 },
+    )
+    expect(() => validateData(nonRally)).toThrow('earlier rally')
+  })
+})

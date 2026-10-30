@@ -1,0 +1,31 @@
+.match-clock {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0 12px;
+  margin: 10px 0;
+  font-size: 12px;
+  color: var(--theme-muted, #6b7280);
+}
+.match-clock-time {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.match-clock-time strong {
+  font-variant-numeric: tabular-nums;
+  color: var(--theme-ink, #1e2925);
+}
+.match-clock .text-button {
+  min-height: 44px;
+}
+.match-clock p {
+  flex-basis: 100%;
+  margin: 0 0 5px;
+}
+.match-clock.is-paused {
+  padding: 0 10px;
+  border-radius: 12px;
+  background: var(--theme-warning-soft, #fff6dc);
+}

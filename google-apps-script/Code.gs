@@ -524,6 +524,7 @@ function validateData_(data) {
         'revision',
         'planSlotId',
         'serviceSetup',
+        'timing',
       ]) ||
       !id_(m.id) ||
       matches[m.id] ||
@@ -605,6 +606,8 @@ function validateData_(data) {
       return 'Invalid serving checkpoint.'
     if (m.endedAt !== undefined && m.endedAt < m.startedAt)
       return 'A match cannot end before it starts.'
+    if (m.timing !== undefined && !matchTiming_(m.timing, m))
+      return 'Invalid recorded match timing.'
     if (m.planSlotId !== undefined && !id_(m.planSlotId)) return 'Invalid schedule slot reference.'
     matches[m.id] = m
   }
@@ -638,6 +641,39 @@ function validateData_(data) {
     }
   }
   return null
+}
+
+function matchTiming_(timing, match) {
+  if (
+    !onlyKeys_(timing, ['pauses', 'finishedAt']) ||
+    !Array.isArray(timing.pauses) ||
+    timing.pauses.length > 20000
+  )
+    return false
+  var finish = timing.finishedAt
+  if (
+    finish !== undefined &&
+    (!finite_(finish) ||
+      finish < match.startedAt ||
+      (match.endedAt !== undefined && finish > match.endedAt))
+  )
+    return false
+  var previousEnd = match.startedAt
+  for (var i = 0; i < timing.pauses.length; i++) {
+    var pause = timing.pauses[i]
+    if (
+      !onlyKeys_(pause, ['from', 'to']) ||
+      !finite_(pause.from) ||
+      pause.from < previousEnd ||
+      (pause.to !== undefined && (!finite_(pause.to) || pause.to < pause.from)) ||
+      (pause.to === undefined && i !== timing.pauses.length - 1) ||
+      (match.endedAt !== undefined &&
+        (pause.to === undefined ? pause.from : pause.to) > match.endedAt)
+    )
+      return false
+    previousEnd = pause.to === undefined ? pause.from : pause.to
+  }
+  return true
 }
 
 function migrateLegacy_(data) {

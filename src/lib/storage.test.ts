@@ -9,6 +9,7 @@ import {
   readBackup,
   saveState,
   validateData,
+  type SavedState,
   type SyncConfig,
 } from './storage'
 
@@ -208,6 +209,243 @@ describe('backup validation', () => {
     const input = fixture()
     input.players[0].level = 6
     expect(() => validateData(input)).toThrow()
+  })
+})
+
+describe('compact recovery journals', () => {
+  beforeEach(async () => {
+    const database = new Dexie('rallysync')
+    database.version(1).stores({ snapshots: 'id' })
+    await database.table('snapshots').clear()
+    database.close()
+  })
+
+  async function usingJournal(run: (values: Map<string, string>) => Promise<void>) {
+    const values = new Map<string, string>()
+    vi.stubGlobal('localStorage', {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => values.set(key, value),
+      removeItem: (key: string) => values.delete(key),
+    })
+    try {
+      await run(values)
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  }
+  const baseState = (): SavedState => ({
+    id: 'main',
+    data: fixture(),
+    sync: emptySync(),
+    saveId: 'base',
+    generation: 1,
+  })
+  const rename = (state: SavedState, name: string, saveId: string): SavedState => ({
+    ...state,
+    saveId,
+    generation: state.generation! + 1,
+    data: {
+      ...state.data,
+      players: state.data.players.map((p, i) => (i === 0 ? { ...p, name } : p)),
+    },
+  })
+
+  it('writes only changed records and recovers an uncommitted score', async () => {
+    await usingJournal(async (values) => {
+      const base = baseState()
+      await saveState(base)
+      const next = {
+        ...base,
+        saveId: 'point-2',
+        generation: 2,
+        data: {
+          ...base.data,
+          matches: base.data.matches.map((m) => ({
+            ...m,
+            revision: 2,
+            actions: [
+              ...m.actions,
+              { id: 'point-2', kind: 'point' as const, side: 'B' as const, at: at + 2000 },
+            ],
+          })),
+        },
+      }
+      journalState(next, base)
+      const journal = JSON.parse(values.get('rallysync-pending-save')!)
+      expect(journal.kind).toBe('overlay-v1')
+      expect(Object.keys(journal.patches)).toEqual(['matches'])
+      expect(journal.patches.matches.upserts).toHaveLength(1)
+      expect(await loadState()).toEqual(next)
+      await saveState(next)
+      expect(values.has('rallysync-pending-save')).toBe(false)
+    })
+  })
+
+  it('preserves a reversion when an older queued snapshot commits first', async () => {
+    await usingJournal(async (values) => {
+      const base = baseState()
+      await saveState(base)
+      const first = rename(base, 'Temporary name', 'first')
+      journalState(first, base)
+      const next = rename(first, base.data.players[0].name, 'reverted')
+      journalState(next, first)
+      await saveState(first)
+      expect(values.has('rallysync-pending-save')).toBe(true)
+      expect(await loadState()).toEqual(next)
+    })
+  })
+
+  it('retains earlier touches across later changes to other collections', async () => {
+    await usingJournal(async () => {
+      const base = baseState()
+      await saveState(base)
+      const first = rename(base, 'Updated player', 'first')
+      journalState(first, base)
+      const next = {
+        ...first,
+        saveId: 'second',
+        generation: 3,
+        data: {
+          ...first.data,
+          sessions: first.data.sessions.map((s) => ({ ...s, name: 'Updated session' })),
+        },
+      }
+      journalState(next, first)
+      await saveState(first)
+      expect(await loadState()).toEqual(next)
+    })
+  })
+
+  it('recovers deletions and reordered records over an intermediate saved snapshot', async () => {
+    await usingJournal(async () => {
+      const base = baseState()
+      const guest = { id: 'guest', name: 'Guest', level: 3, createdAt: at }
+      base.data = { ...base.data, players: [...base.data.players, guest] }
+      await saveState(base)
+      const first = {
+        ...base,
+        saveId: 'deleted',
+        generation: 2,
+        data: {
+          ...base.data,
+          players: base.data.players.filter((p) => p.id !== 'guest').reverse(),
+        },
+      }
+      journalState(first, base)
+      const next = {
+        ...first,
+        saveId: 'reinserted',
+        generation: 3,
+        data: {
+          ...first.data,
+          players: [guest, ...first.data.players],
+        },
+      }
+      journalState(next, first)
+      await saveState(first)
+      expect(await loadState()).toEqual(next)
+    })
+  })
+
+  it('refuses an overlay whose saved base is missing or unrelated', async () => {
+    await usingJournal(async () => {
+      const base = baseState()
+      await saveState(base)
+      journalState(rename(base, 'Updated player', 'first'), base)
+      const database = new Dexie('rallysync')
+      database.version(1).stores({ snapshots: 'id' })
+      await database.table('snapshots').put({ ...base, saveId: 'unrelated' })
+      await expect(loadState()).rejects.toThrow('does not match')
+      await database.table('snapshots').clear()
+      await expect(loadState()).rejects.toThrow('does not match')
+      database.close()
+    })
+  })
+
+  it('keeps a final deletion when an earlier pending rename commits first', async () => {
+    await usingJournal(async () => {
+      const base = baseState()
+      base.data = {
+        ...base.data,
+        players: [
+          ...base.data.players,
+          {
+            id: 'guest',
+            name: 'Guest',
+            level: 3,
+            createdAt: at,
+          },
+        ],
+      }
+      await saveState(base)
+      const first = rename(base, 'Updated player', 'first')
+      journalState(first, base)
+      const next = {
+        ...first,
+        saveId: 'deleted',
+        generation: 3,
+        data: {
+          ...first.data,
+          players: first.data.players.filter((p) => p.id !== 'guest'),
+        },
+      }
+      journalState(next, first)
+      await saveState(first)
+      expect(await loadState()).toEqual(next)
+      expect((await loadState())?.data.players.some((p) => p.id === 'guest')).toBe(false)
+    })
+  })
+
+  it('falls back to a full snapshot after a failed journal write', async () => {
+    await usingJournal(async (values) => {
+      const base = baseState()
+      await saveState(base)
+      const first = rename(base, 'First update', 'first')
+      const setItem = localStorage.setItem
+      localStorage.setItem = () => {
+        throw new Error('quota')
+      }
+      expect(() => journalState(first, base)).toThrow('quota')
+      localStorage.setItem = setItem
+      const next = rename(first, 'Latest update', 'second')
+      journalState(next, first)
+      expect(JSON.parse(values.get('rallysync-pending-save')!).data).toEqual(next.data)
+      expect(await loadState()).toEqual(next)
+    })
+  })
+
+  it('can recover a self-contained legacy journal even when IndexedDB reads fail', async () => {
+    await usingJournal(async () => {
+      const state = baseState()
+      journalState(state)
+      const database = new Dexie('rallysync')
+      database.version(1).stores({ snapshots: 'id' })
+      const tablePrototype = Object.getPrototypeOf(database.table('snapshots'))
+      const get = vi
+        .spyOn(tablePrototype, 'get')
+        .mockRejectedValueOnce(new Error('disk unavailable'))
+      try {
+        expect(await loadState()).toEqual(state)
+      } finally {
+        get.mockRestore()
+        database.close()
+      }
+    })
+  })
+
+  it('ignores a stale journal after a newer transaction has completed', async () => {
+    await usingJournal(async (values) => {
+      const base = baseState()
+      await saveState(base)
+      const first = rename(base, 'First update', 'first')
+      journalState(first, base)
+      const staleJournal = values.get('rallysync-pending-save')!
+      const next = rename(first, 'Latest update', 'second')
+      await saveState(next)
+      values.set('rallysync-pending-save', staleJournal)
+      expect(await loadState()).toEqual(next)
+      expect(values.has('rallysync-pending-save')).toBe(false)
+    })
   })
 })
 

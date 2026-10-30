@@ -180,3 +180,7 @@ Official references:
 - [Content Service and redirects](https://developers.google.com/apps-script/guides/content)
 - [Apps Script quotas](https://developers.google.com/apps-script/guides/services/quotas)
 - [Lock Service](https://developers.google.com/apps-script/reference/lock/lock-service)
+
+### Updating from v0.3
+
+RallySync v0.4 adds optional match timing records (recorded pauses and play finish). Redeploy this version of `Code.gs` before syncing new matches, and update other group devices. Older strict scripts reject these fields instead of silently discarding them. Existing local history remains readable; untracked older match times stay elapsed estimates.

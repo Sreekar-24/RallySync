@@ -2,7 +2,7 @@
 
 **Less organizing. More badminton.** A responsive, installable courtside companion for your regular crew, hosted as a static app with no required backend or player accounts.
 
-Interface previews: [desktop clubhouse](docs/screenshots/desktop.png) · [mobile scoring](docs/screenshots/mobile-scoring.png) · [dark scoring](docs/screenshots/dark-scoring.png) · [interactive rules](docs/screenshots/rules.png) · [full schedule](docs/screenshots/schedule.png) · [partnership insights](docs/screenshots/partnerships.png).
+Interface previews: [desktop clubhouse](docs/screenshots/desktop.png) · [mobile scoring](docs/screenshots/mobile-scoring.png) · [focused scoring](docs/screenshots/focused-scoring.png) · [dark scoring](docs/screenshots/dark-scoring.png) · [interactive rules](docs/screenshots/rules.png) · [full schedule](docs/screenshots/schedule.png) · [partnership insights](docs/screenshots/partnerships.png).
 
 ## What works
 
@@ -10,12 +10,17 @@ Interface previews: [desktop clubhouse](docs/screenshots/desktop.png) · [mobile
 - Full-session schedules based on total match count or estimated hours, match length, and changeovers. Review all rounds, playing/rest time, and planning tradeoffs before playing.
 - Weighted fair, balanced, or social-variety recommendations using court opportunity, play/rest sequences, provisional strength, partner/opponent history, and conservative partnership evidence. Contribution weighting is opt-in and requires sufficient attribution coverage.
 - Lock future lineups, edit pairings, swap an equivalent future matchup where practical, and repair remaining assignments. Active/completed matches stay intact.
+- A personal “What’s next?” card remembers your selected player on this device and shows current court, next partners/opponents, and estimated wait. Live-game finish times remain estimates.
+- Concrete matchup explanations and before/after participation previews make manual schedule changes easier to judge.
 - Team, individual, or combined doubles scoring: a credited player point adds exactly one to their side. Unassigned points remain explicit.
 - Editable totals and per-game/player allocation, atomic undo, deuce/caps, 11/15-point house games, 21-point games, and one-game/best-of-three matches. A winning score is provisional until **Confirm result**.
 - Touch-friendly plus/minus counters beside directly editable score boxes, including individual credited-point removal. Known rallies replay exactly; typed corrections remain auditable and undoable.
+- Protected score/position drafts, an optional focused scoreboard, recent scoring actions, and optional screen-awake support while scoring. Point-entry preferences stay local to each match; changing the session default is explicit.
+- Pause/resume timing for matches, with play duration separate from elapsed occupancy and result confirmation. Older records retain their original elapsed timing.
 - A compact next-serve court: tap the first server, swap partners to match actual service positions, and flip the view. Server, diagonal receiver, and right/left courts follow rallies automatically. Position checks after manual corrections avoid guessing doubles rotation.
 - Correct accepted results from History or the schedule without double-counting a match. Delete one session without clearing unrelated sessions or player identities.
 - All-time, today, custom-date, session, format, and selected-player rankings. Compare partnerships, opposing sides, contribution coverage, and participation. Weighted performance and provisional strength are explained separately from wins.
+- End-of-session recaps combine results, participation and partnership sample sizes with exports/backups. “Play again” copies players and settings into a fresh attendance check without copying scores, breaks or teams.
 - Scoped JSON/CSV analysis exports and print-ready PDF reports. Complete JSON backups remain a separate recovery format.
 - Optional external LLM planning: export context/prompt, import revision-checked JSON, preview, and apply. No AI API or subscription is needed by the app.
 - Searchable rules, named-player service rotations, optional step/play/pause lessons, and interactive service/rally boundaries. Receiving players stay fixed when service changes.

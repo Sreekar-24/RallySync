@@ -129,6 +129,13 @@ const matchSchema = z
       })
       .strict()
       .optional(),
+    timing: z
+      .object({
+        pauses: z.array(z.object({ from: time, to: time.optional() }).strict()).max(20000),
+        finishedAt: time.optional(),
+      })
+      .strict()
+      .optional(),
   })
   .strict()
 const dataSchema = z
@@ -258,6 +265,26 @@ export function validateData(input: unknown): AppData {
       throw new Error('Invalid match participants or court.')
     if (m.endedAt !== undefined && m.endedAt < m.startedAt)
       throw new Error('A match cannot end before it starts.')
+    if (m.timing) {
+      const finish = m.timing.finishedAt
+      if (
+        finish !== undefined &&
+        (finish < m.startedAt || (m.endedAt !== undefined && finish > m.endedAt))
+      )
+        throw new Error('Invalid recorded play end.')
+      let previousEnd = m.startedAt
+      for (let i = 0; i < m.timing.pauses.length; i++) {
+        const pause = m.timing.pauses[i]
+        if (
+          pause.from < previousEnd ||
+          (pause.to !== undefined && pause.to < pause.from) ||
+          (pause.to === undefined && i !== m.timing.pauses.length - 1) ||
+          (m.endedAt !== undefined && (pause.to ?? pause.from) > m.endedAt)
+        )
+          throw new Error('Invalid recorded pause intervals.')
+        previousEnd = pause.to ?? pause.from
+      }
+    }
     if (!unique(m.actions.map((a) => a.id))) throw new Error('Invalid scoring events.')
     const earlierActions = new Map<string, (typeof m.actions)[number]>()
     for (const action of m.actions) {
@@ -388,36 +415,171 @@ export const emptySync = (): SyncConfig => ({
 
 const db = new Dexie('rallysync') as Dexie & { snapshots: EntityTable<SavedState, 'id'> }
 db.version(1).stores({ snapshots: 'id' })
-export async function loadState(): Promise<SavedState | undefined> {
-  // A tiny synchronous write-ahead journal protects the last action if a tab is
-  // closed before its asynchronous IndexedDB transaction has completed.
-  const journal =
-    typeof localStorage === 'undefined' ? null : localStorage.getItem('rallysync-pending-save')
-  if (journal) {
-    const pending = JSON.parse(journal) as SavedState
-    return {
-      ...pending,
-      id: 'main',
-      data: validateData(pending.data),
-      sync: { ...emptySync(), ...pending.sync },
+
+type Entity = AppData['players'][number] | AppData['sessions'][number] | AppData['matches'][number]
+type Collection = 'players' | 'sessions' | 'matches'
+interface RecordPatch {
+  upserts: Entity[]
+  removed: string[]
+  order?: string[]
+}
+interface OverlayJournal extends Omit<SavedState, 'data'> {
+  kind: 'overlay-v1'
+  version: AppData['version']
+  baseGeneration: number
+  baseSaveId?: string
+  /** Identifies intermediate snapshots over which this cumulative patch is safe. */
+  ancestors: string[]
+  patches: Partial<Record<Collection, RecordPatch>>
+}
+const journalKey = 'rallysync-pending-save'
+let committedState: SavedState | undefined
+let pendingJournal: SavedState | OverlayJournal | undefined
+
+function isOverlay(value: SavedState | OverlayJournal): value is OverlayJournal {
+  return 'kind' in value && value.kind === 'overlay-v1'
+}
+
+function extendPatch(previous: Entity[], next: Entity[], patch?: RecordPatch): RecordPatch {
+  const before = new Map(previous.map((item) => [item.id, item]))
+  const after = new Set(next.map((item) => item.id))
+  const upserts = new Map(patch?.upserts.map((item) => [item.id, item]))
+  const removed = new Set(patch?.removed)
+  for (const item of next) {
+    if (before.get(item.id) !== item) {
+      upserts.set(item.id, item)
+      removed.delete(item.id)
     }
   }
-  const saved = await db.snapshots.get('main')
+  for (const item of previous) {
+    if (!after.has(item.id)) {
+      removed.add(item.id)
+      upserts.delete(item.id)
+    }
+  }
+  const orderChanged =
+    previous.length !== next.length || previous.some((item, index) => item.id !== next[index]?.id)
+  return {
+    upserts: [...upserts.values()],
+    removed: [...removed],
+    ...(orderChanged
+      ? { order: next.map((item) => item.id) }
+      : patch?.order
+        ? { order: patch.order }
+        : {}),
+  }
+}
+
+function applyPatch(base: Entity[], patch: RecordPatch): Entity[] {
+  const items = new Map(base.map((item) => [item.id, item]))
+  for (const id of patch.removed) items.delete(id)
+  for (const item of patch.upserts) items.set(item.id, item)
+  if (!patch.order) return [...items.values()]
+  if (new Set(patch.order).size !== patch.order.length || patch.order.length !== items.size)
+    throw new Error('The pending recovery journal contains an invalid record order.')
+  return patch.order.map((id) => {
+    const item = items.get(id)
+    if (!item) throw new Error('The pending recovery journal references a missing record.')
+    return item
+  })
+}
+
+export async function loadState(): Promise<SavedState | undefined> {
+  // Read the persisted base before applying a cumulative overlay. Never accept
+  // a patch against an unrelated or missing history.
+  committedState = undefined
+  pendingJournal = undefined
+  const journal = typeof localStorage === 'undefined' ? null : localStorage.getItem(journalKey)
+  const pending = journal ? (JSON.parse(journal) as SavedState | OverlayJournal) : undefined
+  let saved: SavedState | undefined
+  try {
+    saved = await db.snapshots.get('main')
+    committedState = saved
+  } catch (error) {
+    // A full recovery journal can still rescue the latest actions if IndexedDB
+    // is unavailable. An overlay needs its persisted base.
+    if (!pending || isOverlay(pending)) throw error
+  }
+  if (pending) {
+    // A completed transaction can outlive its journal cleanup (e.g. a crash).
+    if (saved && (saved.generation ?? 0) > (pending.generation ?? 0)) {
+      localStorage.removeItem(journalKey)
+    } else {
+      let data: AppData
+      if (isOverlay(pending)) {
+        const generation = saved?.generation ?? 0
+        const belongsToBase =
+          generation === pending.baseGeneration && saved?.saveId === pending.baseSaveId
+        const belongsToChain = Boolean(saved?.saveId) && pending.ancestors.includes(saved!.saveId!)
+        if (!saved || generation < pending.baseGeneration || (!belongsToBase && !belongsToChain))
+          throw new Error('The pending recovery journal does not match the saved history.')
+        const merged = { ...saved.data, version: pending.version }
+        for (const key of ['players', 'sessions', 'matches'] as const) {
+          const patch = pending.patches[key]
+          if (patch) Object.assign(merged, { [key]: applyPatch(saved.data[key], patch) })
+        }
+        data = validateData(merged)
+      } else data = validateData(pending.data)
+      const recovered = {
+        id: 'main',
+        data,
+        sync: { ...emptySync(), ...pending.sync },
+        saveId: pending.saveId,
+        generation: pending.generation,
+      }
+      // After reload, use a full journal until the recovered snapshot commits.
+      // The parsed overlay's objects have different identity from React's data.
+      pendingJournal = recovered
+      return recovered
+    }
+  }
   if (saved)
     return { ...saved, data: validateData(saved.data), sync: { ...emptySync(), ...saved.sync } }
 }
-export function journalState(state: SavedState): void {
-  if (typeof localStorage !== 'undefined')
-    localStorage.setItem('rallysync-pending-save', JSON.stringify(state))
+export function journalState(state: SavedState, previous?: SavedState): void {
+  if (typeof localStorage === 'undefined') return
+  let next: SavedState | OverlayJournal = state
+  const extendsPending =
+    previous?.saveId && pendingJournal?.saveId === previous.saveId && isOverlay(pendingJournal)
+  const startsAtCommitted =
+    previous?.saveId &&
+    committedState?.saveId === previous.saveId &&
+    committedState.generation === previous.generation
+  if (previous && state.saveId && (extendsPending || startsAtCommitted)) {
+    const overlay = extendsPending ? (pendingJournal as OverlayJournal) : undefined
+    const patches = { ...overlay?.patches }
+    for (const key of ['players', 'sessions', 'matches'] as const) {
+      if (previous.data[key] !== state.data[key])
+        patches[key] = extendPatch(previous.data[key], state.data[key], patches[key])
+    }
+    next = {
+      kind: 'overlay-v1',
+      id: 'main',
+      version: state.data.version,
+      sync: state.sync,
+      saveId: state.saveId,
+      generation: state.generation,
+      baseGeneration: overlay?.baseGeneration ?? previous.generation ?? 0,
+      baseSaveId: overlay?.baseSaveId ?? previous.saveId,
+      ancestors: [...(overlay?.ancestors ?? []), state.saveId],
+      patches,
+    }
+  }
+  // Publish in-memory ancestry only after the synchronous write succeeds.
+  localStorage.setItem(journalKey, JSON.stringify(next))
+  pendingJournal = next
 }
 export async function saveState(state: SavedState): Promise<void> {
   await db.snapshots.put(state)
+  committedState = state
   if (typeof localStorage !== 'undefined') {
-    const journal = localStorage.getItem('rallysync-pending-save')
+    const journal = localStorage.getItem(journalKey)
     if (journal) {
-      const pending = JSON.parse(journal) as SavedState
-      if (pending.saveId === state.saveId || (pending.generation ?? 0) < (state.generation ?? 0))
-        localStorage.removeItem('rallysync-pending-save')
+      const pending = JSON.parse(journal) as SavedState | OverlayJournal
+      if (pending.saveId === state.saveId || (pending.generation ?? 0) < (state.generation ?? 0)) {
+        localStorage.removeItem(journalKey)
+        pendingJournal = undefined
+      }
     }
   }
 }

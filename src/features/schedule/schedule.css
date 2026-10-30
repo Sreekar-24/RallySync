@@ -1249,3 +1249,99 @@
     transition: none;
   }
 }
+
+.schedule-match-explanation {
+  margin: 12px 0;
+  color: var(--theme-muted, #647569);
+  font-size: 11px;
+}
+.schedule-match-explanation > summary,
+.schedule-participation-preview details > summary {
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  font-weight: 700;
+}
+.schedule-match-explanation > summary::before,
+.schedule-participation-preview details > summary::before {
+  content: '+';
+  font-size: 16px;
+}
+.schedule-match-explanation[open] > summary::before,
+.schedule-participation-preview details[open] > summary::before {
+  content: '−';
+}
+.schedule-match-explanation .schedule-match-reason {
+  margin-top: 0;
+}
+.schedule-explanation-note {
+  font-size: 10px;
+  line-height: 1.6;
+}
+.schedule-participation-preview {
+  padding: 16px;
+  border: 1px solid var(--theme-line, #dce4de);
+  border-radius: 14px;
+  margin: 16px 0;
+  color: var(--theme-ink, #263a2b);
+  background: var(--theme-canvas, #f5f7f3);
+  font-size: 12px;
+}
+.schedule-impact-metrics {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+.schedule-impact-metrics p {
+  display: grid;
+  gap: 6px;
+  line-height: 1.5;
+}
+.schedule-impact-metrics span,
+.schedule-impact-note {
+  color: var(--theme-muted, #647569);
+}
+.schedule-impact-metrics b {
+  font-size: 15px;
+}
+.schedule-impact-note {
+  font-size: 11px;
+  line-height: 1.7;
+  margin: 8px 0 0;
+}
+.schedule-impact-scroll {
+  max-width: 100%;
+  overflow-x: auto;
+}
+.schedule-impact-scroll table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+  font-size: 11px;
+}
+.schedule-impact-scroll th,
+.schedule-impact-scroll td {
+  padding: 10px 8px;
+  border-bottom: 1px solid var(--theme-line, #dce4de);
+  white-space: nowrap;
+}
+.schedule-impact-scroll th:first-child {
+  white-space: normal;
+  min-width: 85px;
+}
+@media (max-width: 480px) {
+  .schedule-participation-preview {
+    padding: 12px;
+  }
+  .schedule-impact-metrics {
+    gap: 10px;
+  }
+  .schedule-impact-metrics span {
+    font-size: 10px;
+  }
+  .schedule-impact-metrics b {
+    font-size: 12px;
+  }
+}

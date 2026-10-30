@@ -2,14 +2,17 @@ import { useState } from 'react'
 import { CalendarDays, ChevronDown, ChevronUp, Clock3, Flag, History, Users } from 'lucide-react'
 import { useRally } from '../store'
 import { scoreMatch } from '../domain/engine'
+import { matchPlayMinutes } from '../domain/timing'
 import type { Match, Session } from '../domain/model'
 import './collection.css'
 import SessionActions from './SessionActions'
 import ReportActions from './ReportActions'
+import SessionSummary from './SessionSummary'
 
 export default function HistoryPage({
   onCorrectMatch,
-}: { onCorrectMatch?: (matchId: string) => void } = {}) {
+  onPlayAgain,
+}: { onCorrectMatch?: (matchId: string) => void; onPlayAgain?: (session: Session) => void } = {}) {
   const { data, readOnly } = useRally()
   const [filter, setFilter] = useState('all')
   const [expanded, setExpanded] = useState<string | null>(null)
@@ -19,7 +22,7 @@ export default function HistoryPage({
   const completed = data.matches.filter((match) => match.status === 'completed').length
   const minutes = data.matches
     .filter((match) => match.status === 'completed' && match.endedAt)
-    .reduce((sum, match) => sum + Math.max(0, (match.endedAt! - match.startedAt) / 60000), 0)
+    .reduce((sum, match) => sum + matchPlayMinutes(match), 0)
 
   return (
     <div className="collection-page history-page">
@@ -43,7 +46,7 @@ export default function HistoryPage({
           <strong>{completed}</strong>
         </div>
         <div>
-          <span>Recorded court time</span>
+          <span>Recorded match time</span>
           <strong>
             {Math.round(minutes)}
             <small> min</small>
@@ -132,9 +135,18 @@ export default function HistoryPage({
                 {open && (
                   <div className="history-session-body" id={`session-${session.id}`}>
                     <div className="history-session-actions">
-                      <ReportActions data={data} sessionId={session.id} scopeLabel={session.name} />
+                      {session.status !== 'completed' && (
+                        <ReportActions
+                          data={data}
+                          sessionId={session.id}
+                          scopeLabel={session.name}
+                        />
+                      )}
                       <SessionActions session={session} onDeleted={() => setExpanded(null)} />
                     </div>
+                    {session.status === 'completed' && (
+                      <SessionSummary session={session} onPlayAgain={onPlayAgain} />
+                    )}
                     <p className="history-session-rules">
                       {new Date(session.startedAt).toLocaleDateString(undefined, {
                         weekday: 'long',
@@ -170,7 +182,8 @@ export default function HistoryPage({
       )}
       <p className="collection-footnote">
         Stopped and unfinished matches stay in your journal but do not count toward wins or
-        rankings. Court time is elapsed match duration, not tracked active rally time.
+        rankings. Match time excludes recorded pauses and result review when tracked; older matches
+        use elapsed duration. It is not measured active rally time.
       </p>
     </div>
   )
@@ -189,9 +202,7 @@ function MatchRecord({
 }) {
   const score = scoreMatch(match, session)
   const ended = match.status === 'completed'
-  const duration = match.endedAt
-    ? Math.max(0, Math.round((match.endedAt - match.startedAt) / 60000))
-    : null
+  const duration = match.endedAt ? Math.round(matchPlayMinutes(match)) : null
   return (
     <div className="history-match">
       <div className="history-match-court">
@@ -225,7 +236,7 @@ function MatchRecord({
           {duration !== null && (
             <>
               {' '}
-              · <Clock3 size={11} /> {duration} min
+              · <Clock3 size={11} /> {duration} min {match.timing ? 'play' : 'elapsed'}
             </>
           )}
         </span>

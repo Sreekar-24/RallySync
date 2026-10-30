@@ -69,6 +69,65 @@ function assertNoOverlap(session: Session) {
 }
 
 describe('complete session planning', () => {
+  it('excludes tracked pauses and result review from recorded participation minutes', () => {
+    const { data, session } = fixture(4)
+    data.matches.push({
+      id: 'timed',
+      sessionId: session.id,
+      court: 1,
+      teamA: ['p0', 'p1'],
+      teamB: ['p2', 'p3'],
+      startedAt: at,
+      endedAt: at + 20 * minute,
+      status: 'completed',
+      actions: [],
+      revision: 1,
+      timing: {
+        pauses: [{ from: at + 2 * minute, to: at + 7 * minute }],
+        finishedAt: at + 12 * minute,
+      },
+    })
+    expect(planSummary(data, session, at + 30 * minute).map((row) => row.projectedMinutes)).toEqual(
+      [7, 7, 7, 7],
+    )
+  })
+
+  it('explains factual load, rest and repeated partnership evidence before each selection', () => {
+    const { data, session } = fixture(4)
+    data.players.forEach((player) => {
+      player.level = 3
+    })
+    session.planning!.matchCount = 4
+    const plan = generatePlan(data, session, { now: at })
+    expect(plan.slots[0].reason).toContain(
+      '0 earlier matches per selected player; 0 available rest rounds',
+    )
+    expect(plan.slots[0].reason).toContain('Estimated team rating gap: 0')
+    expect(plan.slots[0].reason).toContain('2 partnerships new in recorded/planned history')
+    expect(plan.slots[3].reason).toContain('3 earlier matches per selected player')
+    expect(plan.slots[3].reason).toContain('Both partnerships appeared earlier')
+    expect(plan.slots.every((slot) => slot.reason.length <= 1000)).toBe(true)
+  })
+
+  it('shows how a new plan changes each player’s estimated participation before it is applied', () => {
+    const { data, session } = fixture(8)
+    const planned = replanSession(data, session, at)
+    const original = planSummary(data, planned)
+    const shortened = {
+      ...planned,
+      plan: { ...planned.plan!, slots: planned.plan!.slots.slice(0, 1) },
+    }
+    const preview = planSummary(data, shortened)
+    const chosen = new Set([...shortened.plan.slots[0].teamA, ...shortened.plan.slots[0].teamB])
+    for (const row of preview) {
+      expect(row.plannedMatches).toBe(chosen.has(row.playerId) ? 1 : 0)
+      expect(row.projectedMinutes).toBe(chosen.has(row.playerId) ? 12 : 0)
+      expect(row.maxConsecutiveRests).toBe(chosen.has(row.playerId) ? 0 : 1)
+    }
+    expect(original.every((row) => row.plannedMatches === 6)).toBe(true)
+    expect(planned.plan!.slots).toHaveLength(12)
+  })
+
   it('plans total matches, distributes eight players evenly, and spreads rests', () => {
     const { data, session } = fixture()
     const before = structuredClone(data)

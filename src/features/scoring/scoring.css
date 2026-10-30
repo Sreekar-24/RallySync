@@ -429,12 +429,15 @@
   color: #4e6541;
 }
 .scoring-mode-select select {
+  min-width: 0;
+  width: 100%;
   min-height: 44px;
   font-size: 12px;
   padding: 9px 11px;
 }
 .scoring-mode-select small {
-  grid-column: 2;
+  grid-column: 1 / -1;
+  min-width: 0;
   font-size: 11px;
   color: #63745a;
   line-height: 1.5;
@@ -445,10 +448,214 @@
     gap: 8px;
   }
   .scoring-mode-select small {
-    grid-column: 1;
+    grid-column: 1 / -1;
     font-size: 10px;
   }
   .scoring-mode-select select {
     font-size: 12px;
+  }
+}
+
+.scoring-view-options {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+.scoring-view-options .text-button {
+  min-height: 44px;
+  white-space: normal;
+  text-align: left;
+  font-size: 11px;
+}
+.scoring-view-options [aria-pressed='true'] {
+  color: var(--theme-ink, #243522);
+  background: var(--theme-accent-soft, #e9f2d9);
+  border-radius: 8px;
+  padding-inline: 10px;
+}
+.scoring-more-tools,
+.scoring-session-default {
+  min-height: 44px;
+  margin-bottom: 10px;
+}
+.score-secondary-tools {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.score-secondary-tools[hidden] {
+  display: none;
+}
+.focused-scoring .service-caption {
+  margin-block: 7px;
+}
+.focused-scoring .direct-score-input {
+  height: 110px;
+}
+.draft-navigation {
+  padding: 16px;
+  margin-top: 16px;
+  border: 1px solid var(--theme-line, #ccd6c3);
+  border-radius: 12px;
+  background: var(--theme-raised, #fff);
+  color: var(--theme-ink, #293e26);
+}
+.draft-navigation strong {
+  font-size: 14px;
+}
+.draft-navigation p {
+  margin-block: 7px 12px;
+  color: var(--theme-muted, #5b6a51);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.draft-navigation > div {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.draft-navigation button {
+  min-height: 44px;
+  white-space: normal;
+}
+.recent-rallies {
+  margin-top: 14px;
+  color: var(--theme-ink, #344b2c);
+}
+.recent-rallies summary {
+  cursor: pointer;
+  min-height: 44px;
+  padding-block: 12px;
+  font-size: 12px;
+  font-weight: 700;
+}
+.recent-rallies ol {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.recent-rallies li {
+  padding: 7px 9px;
+  border-radius: 7px;
+  background: var(--theme-canvas, #f3f6ed);
+  border: 1px solid var(--theme-line, #e0e6d7);
+  font-size: 11px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.recent-rallies p {
+  margin-top: 9px;
+  font-size: 10px;
+  color: var(--theme-muted, #617255);
+  line-height: 1.6;
+}
+@media (max-width: 420px) {
+  .scoring-view-options .text-button {
+    font-size: 10px;
+    max-width: 100%;
+  }
+  .focused-scoring .direct-score-input {
+    height: 90px;
+  }
+  .draft-navigation {
+    padding: 12px;
+  }
+  .draft-navigation .button {
+    font-size: 11px;
+  }
+}
+
+/* Court-side focus keeps the current serve and scoring controls together. */
+.modal:has(.focused-scoring) .modal-header {
+  padding-bottom: 10px;
+}
+.modal:has(.focused-scoring) .scoreboard-meta {
+  padding-bottom: 4px;
+}
+.modal:has(.focused-scoring) .scoring-view-options {
+  margin-bottom: 0;
+}
+.modal:has(.focused-scoring) .match-clock {
+  margin: 0 0 6px;
+}
+.focused-scoring .service-panel:not(.service-editing) {
+  margin-bottom: 10px;
+}
+.focused-scoring .service-panel:not(.service-editing) .service-heading {
+  padding: 5px 10px;
+}
+.focused-scoring .service-panel:not(.service-editing) .service-heading > div:first-child {
+  gap: 2px;
+}
+.focused-scoring .service-panel:not(.service-editing) .position-court {
+  height: 150px;
+}
+.focused-scoring .service-panel:not(.service-editing) .service-player {
+  min-height: 54px;
+  padding: 4px 5px;
+  gap: 2px;
+}
+.focused-scoring .service-panel:not(.service-editing) .service-caption {
+  font-size: 10px;
+  line-height: 1.5;
+  padding: 5px 10px 7px;
+  margin: 0;
+}
+.focused-scoring .scoring-enhanced .score-side {
+  padding: 10px 9px;
+}
+.focused-scoring .scoring-enhanced .score-names {
+  min-height: 0;
+  margin-block: 4px 7px;
+  line-height: 1.5;
+}
+.focused-scoring .direct-score-input {
+  height: 78px;
+  font-size: 64px;
+}
+.focused-scoring .score-tap-hint {
+  margin-block: 4px 8px;
+}
+.focused-scoring .score-counter-controls .button {
+  min-height: 48px;
+}
+.modal:has(.focused-scoring) .score-help {
+  padding: 8px 0 0;
+}
+.modal:has(.focused-scoring) .score-tools {
+  padding-top: 8px;
+  margin-top: 8px;
+  justify-content: space-between;
+}
+.score-tools .scoring-more-tools {
+  margin: 0;
+  font-size: 11px;
+  white-space: normal;
+}
+@media (max-width: 420px) {
+  .modal:has(.focused-scoring) {
+    padding-block: 14px;
+  }
+  .modal:has(.focused-scoring) .modal-header h2 {
+    font-size: 18px;
+  }
+  .modal:has(.focused-scoring) .modal-header p {
+    margin-top: 3px;
+  }
+  .focused-scoring .scoring-enhanced .score-names {
+    font-size: 10px;
+  }
+  .focused-scoring .service-panel:not(.service-editing) .service-status {
+    font-size: 11px;
+  }
+  .focused-scoring .direct-score-input {
+    height: 70px;
+    font-size: 52px;
   }
 }

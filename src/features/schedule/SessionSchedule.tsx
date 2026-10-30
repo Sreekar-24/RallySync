@@ -461,7 +461,14 @@ export default function SessionSchedule({
                                 </div>
                               ))}
                             </div>
-                            <p className="schedule-match-reason">{slot.reason}</p>
+                            <details className="schedule-match-explanation">
+                              <summary>Why this matchup?</summary>
+                              <p className="schedule-match-reason">{slot.reason}</p>
+                              <p className="schedule-explanation-note">
+                                At planning time; estimates are not predictions or a guarantee of
+                                equal turns.
+                              </p>
+                            </details>
                             <div className="schedule-match-bottom">
                               {match ? (
                                 <button
@@ -882,7 +889,30 @@ function PlanPreviewDialog({
   onApply: () => void
   disabled: boolean
 }) {
+  const { data } = useRally()
   const plan = preview.session.plan as SessionPlan
+  const now = Date.now()
+  const before = planSummary(data, original, now)
+  const after = planSummary(data, preview.session, now)
+  const beforeById = new Map(before.map((row) => [row.playerId, row]))
+  const impact = after.filter((row) => {
+    const previous = beforeById.get(row.playerId)
+    return (
+      !previous ||
+      previous.plannedMatches !== row.plannedMatches ||
+      previous.projectedMinutes !== row.projectedMinutes ||
+      previous.maxConsecutiveRests !== row.maxConsecutiveRests
+    )
+  })
+  const matchRange = (rows: typeof before) => {
+    if (!rows.length) return '0'
+    const counts = rows.map((row) => row.plannedMatches)
+    const min = Math.min(...counts)
+    const max = Math.max(...counts)
+    return min === max ? String(min) : `${min}–${max}`
+  }
+  const maxRest = (rows: typeof before) =>
+    Math.max(0, ...rows.map((row) => row.maxConsecutiveRests))
   const changed = plan.slots.filter((slot) => {
     const old = original.plan?.slots.find((item) => item.id === slot.id)
     return (
@@ -911,6 +941,70 @@ function PlanPreviewDialog({
               Recorded matches stay unchanged.
             </p>
           </div>
+        </div>
+        <div className="schedule-participation-preview" aria-label="Participation impact">
+          <strong>Playing time and rest</strong>
+          <div className="schedule-impact-metrics">
+            <p>
+              <span>Scheduled matches per player</span>
+              <b>
+                {matchRange(before)} → {matchRange(after)}
+              </b>
+            </p>
+            <p>
+              <span>Longest available rest streak</span>
+              <b>
+                {maxRest(before)} → {maxRest(after)} rounds
+              </b>
+            </p>
+          </div>
+          {impact.length ? (
+            <details>
+              <summary>See player changes ({impact.length})</summary>
+              <div
+                className="schedule-impact-scroll"
+                tabIndex={0}
+                aria-label="Player participation changes"
+              >
+                <table>
+                  <caption className="sr-only">Current plan compared with proposed plan</caption>
+                  <thead>
+                    <tr>
+                      <th scope="col">Player</th>
+                      <th scope="col">Matches</th>
+                      <th scope="col">Est. court min</th>
+                      <th scope="col">Longest rest</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {impact.map((row) => {
+                      const previous = beforeById.get(row.playerId)
+                      return (
+                        <tr key={row.playerId}>
+                          <th scope="row">{row.name}</th>
+                          <td>
+                            {previous?.plannedMatches ?? 0} → {row.plannedMatches}
+                          </td>
+                          <td>
+                            {previous?.projectedMinutes ?? 0} → {row.projectedMinutes}
+                          </td>
+                          <td>
+                            {previous?.maxConsecutiveRests ?? 0} → {row.maxConsecutiveRests} rounds
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </details>
+          ) : (
+            <p className="schedule-impact-note">Projected participation is unchanged.</p>
+          )}
+          <p className="schedule-impact-note">
+            Current → proposed. Recorded play + estimated future court time; legacy matches include
+            untracked pauses. Availability can make equal turns impossible.
+          </p>
         </div>
         {plan.warnings.length > 0 && (
           <div className="schedule-warnings">

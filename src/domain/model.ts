@@ -70,6 +70,11 @@ export interface Match {
   revision: number
   planSlotId?: string
   serviceSetup?: ServiceSetup
+  /** Recorded pauses and provisional play end; endedAt remains result-confirmation time. */
+  timing?: {
+    pauses: { from: number; to?: number }[]
+    finishedAt?: number
+  }
 }
 
 export interface AppData {

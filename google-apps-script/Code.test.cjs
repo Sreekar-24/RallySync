@@ -189,6 +189,36 @@ test('empty store, full snapshot round-trip, and repeat setup preserve data and 
   assert.deepEqual(api.pull().data, data)
 })
 
+test('recorded pauses and play end round-trip without altering result confirmation', () => {
+  const api = harness(),
+    data = fixture()
+  data.matches[0].timing = { pauses: [{ from: 13, to: 15 }, { from: 18 }], finishedAt: 20 }
+  data.matches[0].endedAt = 25
+  data.matches[0].status = 'abandoned'
+  const result = api.push(data, 0, 'timing-clock')
+  assert.equal(result.ok, true, JSON.stringify(result))
+  assert.deepEqual(api.pull().data.matches[0].timing, data.matches[0].timing)
+})
+
+test('invalid recorded timing cannot overwrite shared history', () => {
+  const api = harness(),
+    data = fixture()
+  api.push(data, 0, 'original-clock')
+  for (const timing of [
+    { pauses: [{ from: 10, to: 15 }] },
+    { pauses: [{ from: 13, to: 18 }, { from: 16 }] },
+    { pauses: [{ from: 13 }, { from: 16 }] },
+    { pauses: [], finishedAt: 10 },
+    { pauses: [{ from: 13, to: 12 }] },
+  ]) {
+    const bad = structuredClone(data)
+    bad.matches[0].timing = timing
+    assert.equal(api.push(bad, 1, 'bad-clock').code, 'INVALID_DATA')
+  }
+  assert.equal(api.pull().revision, 1)
+  assert.deepEqual(api.pull().data, data)
+})
+
 test('lost-ack retry is idempotent; reused mutation IDs cannot change the payload', () => {
   const api = harness(),
     data = fixture()

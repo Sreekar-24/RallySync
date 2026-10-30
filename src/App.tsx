@@ -4,6 +4,7 @@ import {
   lazy,
   useEffect,
   useState,
+  useRef,
   type ErrorInfo,
   type ReactNode,
 } from 'react'
@@ -36,6 +37,9 @@ import PlayPage, { FinalScoreEntry } from './features/PlayPage'
 import './features/collection.css'
 import DataMaintenance from './features/DataMaintenance'
 import { AppearanceSettings, ThemePicker } from './lib/theme'
+import { saveStatus } from './lib/save-status'
+import type { Session } from './domain/model'
+import type { DraftControls } from './features/scoring/draft'
 
 const PeoplePage = lazy(() => import('./features/PeoplePage'))
 const HistoryPage = lazy(() => import('./features/HistoryPage'))
@@ -82,6 +86,19 @@ export default function App() {
   const [installPrompt, setInstallPrompt] = useState<InstallPrompt | null>(null)
   const [online, setOnline] = useState(navigator.onLine)
   const [correction, setCorrection] = useState<string | null>(null)
+  const [repeatSession, setRepeatSession] = useState<Session | undefined>()
+  const [leavingCorrection, setLeavingCorrection] = useState(false)
+  const correctionDraft = useRef<DraftControls>(null)
+  const correctionGuard = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!leavingCorrection) return
+    correctionGuard.current?.scrollIntoView({ block: 'nearest' })
+    correctionGuard.current?.querySelector<HTMLButtonElement>('button')?.focus()
+  }, [leavingCorrection])
+  const closeCorrection = () => {
+    if (correctionDraft.current?.dirty) setLeavingCorrection(true)
+    else setCorrection(null)
+  }
   const {
     needRefresh: [needRefresh],
     updateServiceWorker,
@@ -125,25 +142,17 @@ export default function App() {
       setInstallPrompt(null)
     } else setInstallHelp(true)
   }
-  const status = isDemo
-    ? 'Demo · not saved'
-    : !online
-      ? 'Offline · saved locally'
-      : persistStatus === 'error'
-        ? 'Backup needed'
-        : syncBusy
-          ? 'Syncing…'
-          : syncError
-            ? 'Sync needs attention'
-            : sync.endpoint
-              ? !sync.lastSyncAt
-                ? 'Connection not checked'
-                : sync.dirty
-                  ? 'Changes waiting to sync'
-                  : 'All changes synced'
-              : persistStatus === 'saving'
-                ? 'Saving on device…'
-                : 'Saved on this device'
+  const status = saveStatus({
+    isDemo,
+    online,
+    persistStatus,
+    storageError,
+    sync,
+    syncBusy,
+    syncError,
+  })
+  const saveNeedsAttention =
+    !isDemo && Boolean(storageError || persistStatus === 'error' || syncError)
 
   if (!ready)
     return (
@@ -258,11 +267,13 @@ export default function App() {
                 {new Date().toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
               </span>
               <button
-                className={`save-status ${!online ? 'offline' : syncError || persistStatus === 'error' ? 'needs-attention' : ''}`}
+                className={`save-status ${saveNeedsAttention ? 'needs-attention' : !online ? 'offline' : ''}`}
                 onClick={() => navigate('settings')}
                 aria-label={status}
               >
-                {!online ? (
+                {saveNeedsAttention ? (
+                  <CircleHelp size={14} />
+                ) : !online ? (
                   <WifiOff size={14} />
                 ) : syncBusy || persistStatus === 'saving' ? (
                   <LoaderCircle size={14} className="spin" />
@@ -339,13 +350,23 @@ export default function App() {
               }
             >
               {page === 'play' ? (
-                <PlayPage onNavigate={navigate} />
+                <PlayPage
+                  onNavigate={navigate}
+                  repeatSession={repeatSession}
+                  onRepeatHandled={() => setRepeatSession(undefined)}
+                />
               ) : page === 'players' ? (
                 <PeoplePage />
               ) : page === 'rankings' ? (
                 <RankingsPage />
               ) : page === 'history' ? (
-                <HistoryPage onCorrectMatch={setCorrection} />
+                <HistoryPage
+                  onCorrectMatch={setCorrection}
+                  onPlayAgain={(previous) => {
+                    setRepeatSession(previous)
+                    navigate('play')
+                  }}
+                />
               ) : page === 'rules' ? (
                 <RulesPage />
               ) : isDemo ? (
@@ -483,9 +504,47 @@ export default function App() {
           <Modal
             title="Keep the record straight."
             subtitle="Correct the team result. Rankings are recalculated from the updated history."
-            onClose={() => setCorrection(null)}
+            onClose={closeCorrection}
           >
-            <FinalScoreEntry match={match} session={session} onSaved={() => setCorrection(null)} />
+            <FinalScoreEntry
+              match={match}
+              session={session}
+              draftRef={correctionDraft}
+              onSaved={() => {
+                setLeavingCorrection(false)
+                setCorrection(null)
+              }}
+            />
+            {leavingCorrection && (
+              <div className="notice warning" role="alert" ref={correctionGuard}>
+                <div>
+                  <strong>Keep your score correction?</strong>
+                  <p>Apply it, discard the draft, or keep editing.</p>
+                </div>
+                <div className="modal-actions">
+                  <button className="button ghost" onClick={() => setLeavingCorrection(false)}>
+                    Keep editing
+                  </button>
+                  <button
+                    className="button danger-ghost"
+                    onClick={() => {
+                      setLeavingCorrection(false)
+                      setCorrection(null)
+                    }}
+                  >
+                    Discard draft
+                  </button>
+                  <button
+                    className="button primary"
+                    onClick={() => {
+                      if (!correctionDraft.current?.apply()) setLeavingCorrection(false)
+                    }}
+                  >
+                    Apply correction
+                  </button>
+                </div>
+              </div>
+            )}
           </Modal>
         )}
       </div>

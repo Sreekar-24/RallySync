@@ -2,7 +2,7 @@
 
 ## Local-first data flow
 
-The UI updates a typed AppData snapshot through one store. Every accepted UI change is queued into IndexedDB in order. A synchronous localStorage write-ahead journal protects the latest pending action from an immediate reload; committed journal entries are cleared without removing newer pending changes. A storage failure is visible and prompts a backup; it is not reported as a successful save. Browser Web Locks guard same-origin editing when supported.
+The UI updates a typed AppData snapshot through one store. Every accepted UI change is queued into IndexedDB in order. A synchronous localStorage write-ahead journal protects the latest pending action from an immediate reload. When a committed base is known, a cumulative record overlay serializes touched players/sessions/matches and removals rather than the entire history. Generation and save ancestry guard recovery against an unrelated base; full journals from earlier versions remain readable. Queued IndexedDB snapshots superseded before starting are skipped; committed journal entries are cleared without removing newer pending changes. A storage failure is visible and prompts a backup; it is not reported as a successful save. Browser Web Locks guard same-origin editing when supported.
 
 Players have stable IDs independent of display names. Sessions record rules and attendance changes. Matches record sides, court, timestamps, revisions, and immutable point/undo/adjustment/retraction actions. `scoreMatch` replays accepted operations; duplicate operation IDs are ignored. Explicit match finalization makes a result eligible for statistics.
 
@@ -30,7 +30,7 @@ Availability and finalized-result/level changes trigger future-plan review. Live
 
 LLM exchange exports player IDs, history, availability, weights, and existing slots plus a JSON template. Imports must cover every unplayed slot, match the current revision, respect locks and exact slot times, and avoid unknown/duplicate/unavailable players or overlaps. Imports never alter actual match records.
 
-Elapsed duration includes pauses. Ratings use level-seeded Elo (600–1400 seed, K=24) with average side strength. Standings, weighted form, estimated strength, and participation remain separate views; sample-size and attribution coverage are visible. The weighted index is a documented local heuristic, not an official badminton ranking.
+New matches record optional pause spans and a play-finish timestamp. Confirmation remains a separate end timestamp; play duration excludes recorded pauses and tracked result-review delay. Legacy matches retain elapsed duration. Paused players/courts stay occupied, so scheduling never assigns them elsewhere. Score edits that reopen a match reopen its play clock; corrections to accepted results preserve historical time. Ratings use level-seeded Elo (600–1400 seed, K=24) with average side strength. Standings, weighted form, estimated strength, and participation remain separate views; sample-size and attribution coverage are visible. The weighted index is a documented local heuristic, not an official badminton ranking.
 
 ## Reports
 
@@ -46,11 +46,23 @@ Apps Script mocks verify storage integrity and conflict behavior. A real deploym
 
 Optional service checkpoints and retraction actions remain additive schema-v2 fields, with strict client/script validation. Existing local data needs no destructive migration. Deploy the updated script before synchronizing these fields; older strict clients/scripts reject unfamiliar fields, preventing silent loss.
 
+## History-size performance
+
+`node scripts/benchmark-journal.mjs` measures synchronous journal work on synthetic history without reading user data. In the cloud Node benchmark, histories of 100 / 1,000 / 5,000 matches took approximately 2 / 24 / 126 ms to serialize in full, compared with 0.2 / 0.6 / 4 ms for cumulative record journaling. The last journal was about 1.3 KB rather than 248 KB / 2.5 MB / 12.8 MB. These are indicative serialization results, not physical-device latency or whole-app performance claims. Full IndexedDB snapshots and analytics can still grow with history size.
+
 ## Validation
 
 Unit tests cover scoring, deuce/cap, best-of-three, undo, result corrections, attendance fairness, scheduling exclusions, and scoped accepted-result statistics. Storage tests exercise reference checks and IndexedDB. Apps Script contract tests use mocked platform services. Production-browser tests cover sessions, collections, rules, persistence, offline reload, backups, synchronization scenarios, and responsive layouts.
 
 Automated accessibility checks complement keyboard labels and manual visual inspection. Browser automation uses Chromium; real iOS/Android installation and screen-reader behavior still warrant device checks.
+
+## Court-side workflow
+
+The scoreboard protects unapplied score and position drafts before close or rule navigation. A device-local per-match point-entry setting prevents one court from silently changing another court’s UI. An explicit session-default action sets the default for matches without overrides. Focus mode hides secondary tools; optional screen-awake support releases on pause, completion, hidden document and close, with a visible fallback when the browser declines.
+
+A read-only next-player projection combines plan slots, attendance windows, court/player occupancy and estimated match/changeover duration. Its selector stays on this device and never changes shared history. Session recaps share the analytics/report scope. Repeating a session copies preferences and player identities into a fresh setup; attendance, availability, results, assignments and timestamps are recreated.
+
+Storage failure takes precedence over connection status. An offline badge can claim local saving only after persistence succeeds.
 
 ## Next increments
 

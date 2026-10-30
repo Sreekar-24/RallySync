@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from 'react'
+import { useEffect, useState } from 'react'
 import {
   ArrowDownToLine,
   ArrowRight,
@@ -11,7 +11,6 @@ import {
   Play,
   Plus,
   Settings2,
-  Sparkles,
   Trophy,
   Users,
 } from 'lucide-react'
@@ -21,8 +20,10 @@ import { scoreMatch, suggestMatch, attendanceSummary } from '../domain/engine'
 import { type Match, type Session, type PlannedMatch } from '../domain/model'
 import ScoreDialog from './scoring/ScoreDialog'
 import SessionSchedule from './schedule/SessionSchedule'
-import PlanningFields, { defaultPlanningSettings } from './schedule/PlanningFields'
-import { generatePlan, editPlanSlot } from '../domain/planner'
+import SessionSetup from './SessionSetup'
+import SessionSummary from './SessionSummary'
+import PlayerNextUp from './schedule/PlayerNextUp'
+import { editPlanSlot } from '../domain/planner'
 import SessionActions from './SessionActions'
 import ReportActions from './ReportActions'
 import AvailabilityWindow from './AvailabilityWindow'
@@ -47,12 +48,38 @@ function availabilityLabel(session: Session, id: string, now = Date.now()) {
 
 export default function PlayPage({
   onNavigate,
+  repeatSession,
+  onRepeatHandled,
 }: {
   onNavigate: (page: 'players' | 'rules' | 'history' | 'rankings') => void
+  repeatSession?: Session
+  onRepeatHandled?: () => void
 }) {
   const { data, commit, notify, readOnly, startDemo, isDemo } = useRally()
   const session = data.sessions.find((s) => s.status === 'active')
-  const [setup, setSetup] = useState(false)
+  const [setup, setSetup] = useState(Boolean(repeatSession))
+  const [template, setTemplate] = useState<Session | undefined>(repeatSession)
+  const [summaryId, setSummaryId] = useState<string | null>(null)
+  const summary = data.sessions.find((s) => s.id === summaryId && s.status === 'completed')
+  useEffect(() => {
+    if (!repeatSession) return
+    if (session) {
+      notify('Finish the current session before starting another with this group.')
+    } else {
+      setTemplate(repeatSession)
+      setSetup(true)
+    }
+    onRepeatHandled?.()
+  }, [repeatSession, session, notify, onRepeatHandled])
+  const playAgain = (previous: Session) => {
+    setSummaryId(null)
+    setTemplate(previous)
+    setSetup(true)
+  }
+  const newSession = () => {
+    setTemplate(undefined)
+    setSetup(true)
+  }
   const [attendance, setAttendance] = useState(false)
   const [scoring, setScoring] = useState<string | null>(null)
   const [lineup, setLineup] = useState<number | null>(null)
@@ -128,6 +155,7 @@ export default function PlayPage({
           teamA: suggested.teamA,
           teamB: suggested.teamB,
           startedAt: now,
+          timing: { pauses: [] },
           status: 'playing',
           actions: [],
           revision: 0,
@@ -172,7 +200,8 @@ export default function PlayPage({
       ),
     }))
     setEnding(false)
-    notify('Session complete. Your results are saved on this device.')
+    setSummaryId(session.id)
+    notify('Session complete. Review your results and take a backup.')
   }
   const loadDemo = () => {
     startDemo()
@@ -229,7 +258,7 @@ export default function PlayPage({
         <button
           className="button primary"
           disabled={readOnly}
-          onClick={() => (session ? setAttendance(true) : setSetup(true))}
+          onClick={() => (session ? setAttendance(true) : newSession())}
         >
           {session ? (
             <>
@@ -259,7 +288,7 @@ export default function PlayPage({
               <br className="desktop-break" /> Make every rally count.
             </p>
             <div className="hero-actions">
-              <button className="button lime" disabled={readOnly} onClick={() => setSetup(true)}>
+              <button className="button lime" disabled={readOnly} onClick={newSession}>
                 Start a session <ArrowRight size={17} />
               </button>
               {!data.players.length && !data.sessions.length && (
@@ -351,6 +380,7 @@ export default function PlayPage({
           />
         </div>
       )}
+      {session && <PlayerNextUp session={session} onScore={setScoring} />}
       {session && view === 'schedule' && (
         <SessionSchedule
           session={session}
@@ -573,7 +603,7 @@ export default function PlayPage({
                 <br />
                 We’ll suggest the teams and keep the score.
               </p>
-              <button className="button soft" disabled={readOnly} onClick={() => setSetup(true)}>
+              <button className="button soft" disabled={readOnly} onClick={newSession}>
                 Set up your first session <ArrowRight size={16} />
               </button>
               <div className="session-steps">
@@ -730,8 +760,14 @@ export default function PlayPage({
         )}
       </section>
 
-      {setup && (
+      {summary && (
+        <Modal title="A good session, recorded." onClose={() => setSummaryId(null)} wide>
+          <SessionSummary session={summary} onPlayAgain={playAgain} />
+        </Modal>
+      )}
+      {setup && !session && (
         <SessionSetup
+          previous={template}
           onClose={() => setSetup(false)}
           onCreated={() => {
             setSetup(false)
@@ -836,286 +872,6 @@ function Stat({
         <small>{detail}</small>
       </div>
     </div>
-  )
-}
-
-function SessionSetup({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
-  const { data, commit, notify } = useRally()
-  const [name, setName] = useState('')
-  const [selected, setSelected] = useState<string[]>(data.players.map((p) => p.id))
-  const [guest, setGuest] = useState('')
-  const [format, setFormat] = useState<'singles' | 'doubles'>('doubles')
-  const [courts, setCourts] = useState(1)
-  const [target, setTarget] = useState(21)
-  const [bestOf, setBestOf] = useState<1 | 3>(1)
-  const [mode, setMode] = useState<'balanced' | 'fair' | 'variety'>('balanced')
-  const [advanced, setAdvanced] = useState(false)
-  const [planning, setPlanning] = useState(defaultPlanningSettings)
-  const [scoringMode, setScoringMode] = useState<'team' | 'individual' | 'combined'>('combined')
-  const addGuest = () => {
-    const value = guest.trim()
-    if (!value) return
-    if (data.players.some((p) => p.name.toLocaleLowerCase() === value.toLocaleLowerCase())) {
-      notify('That player is already in your crew. Select them below.')
-      return
-    }
-    const id = crypto.randomUUID()
-    commit((current) => ({
-      ...current,
-      players: [...current.players, { id, name: value, level: 3, createdAt: Date.now() }],
-    }))
-    setSelected((current) => [...current, id])
-    setGuest('')
-  }
-  const submit = (e: FormEvent) => {
-    e.preventDefault()
-    if (selected.length < (format === 'doubles' ? 4 : 2)) return
-    const now = Date.now()
-    const session: Session = {
-      id: crypto.randomUUID(),
-      name:
-        name.trim() ||
-        `${new Intl.DateTimeFormat(undefined, { weekday: 'long' }).format(now)} social`,
-      startedAt: now,
-      format,
-      courtCount: courts,
-      target,
-      winBy: 2,
-      cap: target === 21 ? 30 : target + 9,
-      bestOf,
-      mode,
-      planning,
-      scoringMode,
-      playerIds: selected,
-      availablePlayerIds: selected,
-      status: 'active',
-      attendance: selected.map((playerId) => ({ playerId, at: now, available: true })),
-    }
-    commit((current) => {
-      if (current.sessions.some((s) => s.status === 'active')) return current
-      const combined = { ...current, sessions: [...current.sessions, session] }
-      const planned = { ...session, plan: generatePlan(combined, session) }
-      return { ...combined, sessions: [...current.sessions, planned] }
-    })
-    onCreated()
-  }
-  return (
-    <Modal
-      title="Make room for a good game."
-      subtitle="Pick your crew. We’ll take care of the rotation."
-      onClose={onClose}
-      wide
-    >
-      <form onSubmit={submit} className="form-stack">
-        <label className="field">
-          Session name <span className="optional">optional</span>
-          <input
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            maxLength={80}
-            placeholder="e.g. Saturday evening rally"
-          />
-        </label>
-        <div className="field">
-          <div className="field-heading">
-            <span>Who’s playing?</span>
-            <span className="muted">{selected.length} selected</span>
-          </div>
-          <div className="quick-add">
-            <input
-              aria-label="New player name"
-              value={guest}
-              onChange={(e) => setGuest(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  e.preventDefault()
-                  addGuest()
-                }
-              }}
-              maxLength={48}
-              placeholder="Add a player by name"
-            />
-            <button
-              type="button"
-              className="button soft"
-              onClick={addGuest}
-              disabled={!guest.trim()}
-            >
-              <Plus size={17} /> Add
-            </button>
-          </div>
-          <div className="player-chips">
-            {data.players.map((p, i) => (
-              <button
-                type="button"
-                key={p.id}
-                className={`player-chip ${selected.includes(p.id) ? 'selected' : ''}`}
-                aria-pressed={selected.includes(p.id)}
-                onClick={() =>
-                  setSelected((current) =>
-                    current.includes(p.id)
-                      ? current.filter((id) => id !== p.id)
-                      : [...current, p.id],
-                  )
-                }
-              >
-                <Avatar name={p.name} index={i} small />
-                {p.name}
-                {selected.includes(p.id) && <Check size={15} />}
-              </button>
-            ))}
-          </div>
-          {!data.players.length && (
-            <p className="field-help">
-              No sign-ups needed. Add at least 4 players for doubles, or 2 for singles.
-            </p>
-          )}
-        </div>
-        <div className="form-grid">
-          <label className="field">
-            Play style
-            <select
-              value={format}
-              onChange={(e) => setFormat(e.target.value as 'singles' | 'doubles')}
-            >
-              <option value="doubles">Doubles · 4 players</option>
-              <option value="singles">Singles · 2 players</option>
-            </select>
-          </label>
-          <label className="field">
-            Courts
-            <select value={courts} onChange={(e) => setCourts(Number(e.target.value))}>
-              {[1, 2, 3, 4, 5, 6].map((c) => (
-                <option key={c} value={c}>
-                  {c} court{c > 1 ? 's' : ''}
-                </option>
-              ))}
-            </select>
-          </label>
-        </div>
-        <div className="field">
-          <span>Keep the games…</span>
-          <div className="mode-options">
-            {[
-              {
-                id: 'balanced' as const,
-                title: 'Balanced',
-                text: 'Fair turns, even teams',
-                icon: Sparkles,
-              },
-              {
-                id: 'fair' as const,
-                title: 'Fair',
-                text: 'Playing time comes first',
-                icon: Clock3,
-              },
-              { id: 'variety' as const, title: 'Fresh', text: 'Mix up your partners', icon: Users },
-            ].map((m) => (
-              <button
-                type="button"
-                key={m.id}
-                className={`mode-option ${mode === m.id ? 'selected' : ''}`}
-                onClick={() => setMode(m.id)}
-                aria-pressed={mode === m.id}
-              >
-                <m.icon size={18} />
-                <strong>{m.title}</strong>
-                <small>{m.text}</small>
-              </button>
-            ))}
-          </div>
-        </div>
-        <PlanningFields value={planning} onChange={setPlanning} mode={mode} courtCount={courts} />
-        <div className="field">
-          <span>How would you like to score?</span>
-          <div className="scoring-mode-options" role="group" aria-label="Scoring mode">
-            {(
-              [
-                { id: 'team', label: 'Team points' },
-                { id: 'individual', label: 'Player points' },
-                { id: 'combined', label: 'Team + player points' },
-              ] as const
-            ).map((option) => (
-              <button
-                key={option.id}
-                type="button"
-                className={scoringMode === option.id ? 'selected' : ''}
-                aria-pressed={scoringMode === option.id}
-                onClick={() => setScoringMode(option.id)}
-              >
-                {option.label}
-              </button>
-            ))}
-          </div>
-          <small className="field-help">
-            Player points tally into their side’s score. Unassigned points stay visible.
-          </small>
-        </div>
-        <button
-          className="text-button"
-          type="button"
-          aria-expanded={advanced}
-          onClick={() => setAdvanced(!advanced)}
-        >
-          <Settings2 size={16} /> Scoring options{' '}
-          <ChevronRight size={15} className={advanced ? 'rotate-90' : ''} />
-        </button>
-        {advanced && (
-          <div className="form-grid">
-            <label className="field">
-              Points per game
-              <select
-                aria-label="Points per game"
-                value={target}
-                onChange={(e) => setTarget(Number(e.target.value))}
-              >
-                {[11, 15, 21].map((n) => (
-                  <option key={n} value={n}>
-                    {n} points{n !== 21 ? ' · house format' : ' · standard'}
-                  </option>
-                ))}
-              </select>
-              <small className="field-help">
-                Win by 2, capped at {target === 21 ? 30 : target + 9}.
-              </small>
-            </label>
-            <label className="field">
-              Match length
-              <select
-                aria-label="Match length"
-                value={bestOf}
-                onChange={(e) => {
-                  const next = Number(e.target.value) as 1 | 3
-                  setPlanning((current) =>
-                    current.matchMinutes === (bestOf === 3 ? 30 : 12)
-                      ? { ...current, matchMinutes: next === 3 ? 30 : 12 }
-                      : current,
-                  )
-                  setBestOf(next)
-                }}
-              >
-                <option value={1}>One game · social</option>
-                <option value={3}>Best of 3 games</option>
-              </select>
-            </label>
-          </div>
-        )}
-        <div className="modal-actions">
-          <span className="field-help">
-            {selected.length < (format === 'doubles' ? 4 : 2)
-              ? `Select at least ${format === 'doubles' ? 4 : 2} players to start.`
-              : 'You can add people or take breaks anytime.'}
-          </span>
-          <button
-            type="submit"
-            className="button primary"
-            disabled={selected.length < (format === 'doubles' ? 4 : 2)}
-          >
-            Let’s play <ArrowRight size={17} />
-          </button>
-        </div>
-      </form>
-    </Modal>
   )
 }
 

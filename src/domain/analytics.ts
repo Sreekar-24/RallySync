@@ -1,5 +1,6 @@
 import { getStandings, scoreMatch } from './engine'
 import type { AppData, Match, PlayerStats, Session } from './model'
+import { matchPlayIntervals } from './timing'
 
 export interface AnalyticsFilters {
   sessionId?: string
@@ -184,7 +185,7 @@ function participation(
           .filter(([a, b]) => b > a)
         const courtIntervals = sessionMatches
           .filter((m) => contains(m, playerId))
-          .map((m) => [m.startedAt, Math.max(m.startedAt, m.endedAt ?? now)] as [number, number])
+          .flatMap((m) => matchPlayIntervals(m, now))
           .sort((a, b) => a[0] - b[0])
         for (const [start, end] of intervals) {
           available += end - start
@@ -430,7 +431,7 @@ export function getAnalytics(
       performance:
         'Experimental index, 0–100: 50% smoothed win rate ((wins+1)/(matches+2)) + 30% point share + 20% opposition-adjusted form (0.5 + (wins−expectedWins)/(2×(matches+5))). It is not an official rating and never controls court priority.',
       participation:
-        'Elapsed court and available minutes include pauses. Waiting excludes recorded breaks. Round streaks use recorded plan rounds; legacy starts within one minute are grouped as an estimate. Rankings do not award participation priority.',
+        'Recorded play minutes exclude recorded match pauses and tracked result-review time; older records use elapsed duration. Available time excludes recorded attendance breaks. Waiting is available time outside recorded play, including match pauses. Round streaks use recorded plan rounds; legacy starts within one minute are grouped as an estimate. Rankings do not award participation priority.',
       rating:
         'Provisional level-seeded Elo, average team strength and K=24. Scoped ratings restart from declared levels and include only accepted results in that scope.',
     },

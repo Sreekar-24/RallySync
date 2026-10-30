@@ -1,6 +1,7 @@
 import { getAnalytics, type AnalyticsFilters } from '../domain/analytics'
 import { scoreMatch } from '../domain/engine'
 import type { AppData, Match, Session } from '../domain/model'
+import { matchElapsedMinutes, matchPlayMinutes } from '../domain/timing'
 
 export interface ReportOptions {
   sessionId?: string
@@ -24,6 +25,8 @@ export interface ReportMatch {
   startedAt: number
   endedAt: number | null
   elapsedMinutes: number
+  playMinutes: number
+  timingBasis: 'recorded-pauses' | 'legacy-elapsed'
   games: { a: number; b: number; winner: 'A' | 'B' }[]
   currentGame: { a: number; b: number } | null
   winner: 'A' | 'B' | null
@@ -101,7 +104,9 @@ export function buildReport(data: AppData, options: ReportOptions = {}): RallyRe
       status: match.status,
       startedAt: match.startedAt,
       endedAt: match.endedAt ?? null,
-      elapsedMinutes: Math.round(Math.max(0, (match.endedAt ?? now) - match.startedAt) / 6000) / 10,
+      elapsedMinutes: Math.round(matchElapsedMinutes(match, now) * 10) / 10,
+      playMinutes: Math.round(matchPlayMinutes(match, now) * 10) / 10,
+      timingBasis: match.timing ? 'recorded-pauses' : 'legacy-elapsed',
       games: completedGames.map((game) => ({ ...game })),
       currentGame: score.complete ? null : { a: score.a, b: score.b },
       winner: match.status === 'completed' && score.complete ? (score.winner ?? null) : null,
@@ -177,7 +182,7 @@ export function buildReport(data: AppData, options: ReportOptions = {}): RallyRe
       status:
         'Only accepted completed matches with a verified winner affect competitive statistics. Active and stopped matches remain in session reports.',
       minutes:
-        'Elapsed match duration, including pauses, not measured active rally time. Active duration is measured at report generation.',
+        'Elapsed minutes include pauses and result-review time. Play minutes exclude recorded pauses and tracked review time; legacy records retain elapsed duration. Neither measures active rally time. Running durations use report-generation time.',
       rallyOrder:
         'Only explicitly observed point events establish rally order. Final-score entries, score adjustments, and legacy records without provenance do not.',
       scope:
@@ -235,6 +240,8 @@ export function reportToCSV(report: RallyReport): string {
             'Status',
             'Winning side',
             'Elapsed minutes',
+            'Play minutes',
+            'Timing basis',
             'Attribution coverage',
             'Scope',
           ],
@@ -249,6 +256,8 @@ export function reportToCSV(report: RallyReport): string {
             match.status,
             match.winner ?? '',
             match.elapsedMinutes,
+            match.playMinutes,
+            match.timingBasis,
             match.attributionCoverage,
             scopeDescription(report),
           ]),
@@ -355,7 +364,7 @@ export function reportToHTML(report: RallyReport): string {
       ]),
     )}
     <h2>Match results</h2>${table(
-      ['Session / court', 'Side A', 'Side B', 'Scores A–B', 'Status', 'Winner', 'Min'],
+      ['Session / court', 'Side A', 'Side B', 'Scores A–B', 'Status', 'Winner', 'Play min'],
       report.matches.map((match) => [
         `${match.sessionName} / ${match.court}`,
         match.namesA.join(' & '),
@@ -366,7 +375,7 @@ export function reportToHTML(report: RallyReport): string {
         ].join(' / '),
         match.status,
         match.winner ?? '—',
-        match.elapsedMinutes,
+        match.playMinutes,
       ]),
     )}
     <h2>Partnerships</h2><p class="note">Adjusted performance compares wins with expected wins and shrinks small samples toward neutral.</p>${table(

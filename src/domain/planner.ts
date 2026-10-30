@@ -1,4 +1,5 @@
 import { attendanceSummary, getStandings, playerStats, scoreMatch } from './engine'
+import { matchPlayMinutes } from './timing'
 import type { AppData, Match, PlannedMatch, PlanningSettings, Session, SessionPlan } from './model'
 
 type Weights = NonNullable<PlanningSettings['weights']>
@@ -409,7 +410,10 @@ export function generatePlan(
     ids.map((id) => {
       const prior = currentMatches.filter((m) => members(m).includes(id))
       const minutes = prior.reduce(
-        (sum, m) => sum + Math.max(0, (expectedEnd(m, config, now) - m.startedAt) / MINUTE),
+        (sum, m) =>
+          sum +
+          matchPlayMinutes(m, now) +
+          (m.status === 'playing' ? Math.max(0, (expectedEnd(m, config, now) - now) / MINUTE) : 0),
         0,
       )
       return [
@@ -574,6 +578,29 @@ export function generatePlan(
         }
       if (!best) continue
       const reused = preferred && !slots.some((s) => s.id === preferred.id) ? preferred : undefined
+      const selected = [...best.a, ...best.b]
+      const range = (values: number[]) => {
+        const low = Math.min(...values)
+        const high = Math.max(...values)
+        return low === high ? String(low) : `${low}–${high}`
+      }
+      const meanRating = (team: string[]) =>
+        team.reduce((sum, id) => sum + (ratings.get(id) ?? 1000), 0) / team.length
+      const ratingGap = Math.round(Math.abs(meanRating(best.a) - meanRating(best.b)))
+      const newPartnerships = [best.a, best.b].filter(
+        (team) => team.length === 2 && !history.partners.get(pairKey(team)),
+      ).length
+      const reason = [
+        `Before this slot: ${range(selected.map((id) => load.get(id)!.matches))} earlier matches per selected player; ${range(selected.map((id) => load.get(id)!.rests))} available rest rounds.`,
+        `Estimated team rating gap: ${ratingGap} (level and recorded results).`,
+        ...(size === 2
+          ? [
+              newPartnerships
+                ? `${newPartnerships} partnership${newPartnerships === 1 ? '' : 's'} new in recorded/planned history.`
+                : 'Both partnerships appeared earlier in recorded/planned history.',
+            ]
+          : []),
+      ].join(' ')
       const slot: PlannedMatch = {
         id: reused?.id ?? `plan-${session.id}-${session.plan?.revision ?? 0}-${round}-${court}`,
         court,
@@ -582,12 +609,7 @@ export function generatePlan(
         teamA: [...best.a],
         teamB: [...best.b],
         locked: false,
-        reason:
-          session.mode === 'fair'
-            ? 'Court opportunity and even rest intervals first; repeated partners and opponents are secondary.'
-            : session.mode === 'variety'
-              ? 'Fair turns with more partner and opponent variety; strength remains a secondary check.'
-              : 'Balances attendance-adjusted court time, rest intervals, estimated strength, and partnership history.',
+        reason,
       }
       slots.push(slot)
       recordEncounter(history, best.a, best.b)
@@ -734,6 +756,7 @@ export function editPlanSlot(
 export function planSummary(
   data: AppData,
   session: Session,
+  now = Date.now(),
 ): {
   playerId: string
   name: string
@@ -764,7 +787,7 @@ export function planSummary(
           (m) =>
             members(m).includes(playerId) &&
             m.startedAt < start &&
-            expectedEnd(m, config, session.plan?.generatedAt ?? Date.now()) > start,
+            expectedEnd(m, config, session.plan?.generatedAt ?? now) > start,
         )
       const window = session.availability?.[playerId]
       const available =
@@ -789,10 +812,7 @@ export function planSummary(
       }
     }
     const actual = current.filter((m) => members(m).includes(playerId))
-    const actualMinutes = actual.reduce(
-      (sum, m) => sum + Math.max(0, ((m.endedAt ?? Date.now()) - m.startedAt) / MINUTE),
-      0,
-    )
+    const actualMinutes = actual.reduce((sum, m) => sum + matchPlayMinutes(m, now), 0)
     return {
       playerId,
       name: data.players.find((p) => p.id === playerId)?.name ?? 'Unknown player',

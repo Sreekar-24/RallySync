@@ -9,6 +9,7 @@ import type {
   Session,
   Side,
 } from './model'
+import { matchPlayMinutes, syncMatchTiming } from './timing'
 
 export interface ScoreEntry {
   a: number
@@ -321,13 +322,17 @@ export function adjustMatchScores(
     verified.length > 1 && verified.at(-1)!.a === 0 && verified.at(-1)!.b === 0
       ? verified.slice(0, -1)
       : verified
-  return {
-    ...match,
-    status: 'playing',
-    endedAt: undefined,
-    revision: match.revision + 1,
-    actions: [...match.actions, { id: crypto.randomUUID(), kind: 'adjust', at: now, scores }],
-  }
+  return syncMatchTiming(
+    {
+      ...match,
+      status: 'playing',
+      endedAt: undefined,
+      revision: match.revision + 1,
+      actions: [...match.actions, { id: crypto.randomUUID(), kind: 'adjust', at: now, scores }],
+    },
+    session,
+    now,
+  )
 }
 
 /** An accepted result uses one auditable correction, never fabricated per-rally history. */
@@ -341,7 +346,19 @@ export function buildFinalResult(
   const changed = adjustMatchScores(match, session, entries, now)
   if (!scoreMatch(changed, session).complete)
     throw new Error('Enter enough games to decide the match.')
-  return { ...changed, status: 'completed', endedAt: match.endedAt ?? now }
+  return {
+    ...changed,
+    status: 'completed',
+    endedAt: match.endedAt ?? now,
+    ...(match.timing && match.status === 'completed'
+      ? {
+          timing: {
+            ...changed.timing!,
+            finishedAt: match.timing.finishedAt ?? match.endedAt ?? now,
+          },
+        }
+      : {}),
+  }
 }
 
 function baseRating(player: Player): number {
@@ -353,7 +370,7 @@ function matchEnd(match: Match): number {
 }
 
 function duration(match: Match): number {
-  return Math.max(0, matchEnd(match) - match.startedAt) / 60_000
+  return matchPlayMinutes(match, match.endedAt ?? match.actions.at(-1)?.at ?? match.startedAt)
 }
 
 function includesPlayer(match: Match, playerId: string): boolean {

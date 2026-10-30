@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useImperativeHandle, useState, type Ref } from 'react'
+import type { DraftControls } from './draft'
 import { ArrowLeftRight, Check, CircleHelp, RotateCw, X } from 'lucide-react'
 import { Shuttle } from '../../components'
 import type { Match, Session, Side } from '../../domain/model'
@@ -20,11 +21,13 @@ export default function ServiceCourt({
   session,
   disabled,
   onEditingChange,
+  draftRef,
 }: {
   match: Match
   session: Session
   disabled: boolean
   onEditingChange: (value: boolean) => void
+  draftRef?: Ref<DraftControls>
 }) {
   const { data, commit, readOnly, notify } = useRally()
   const state = getServiceState(match, session)
@@ -83,7 +86,7 @@ export default function ServiceCourt({
     })
   }
   const save = () => {
-    if (!draft || !canEdit) return
+    if (!draft || !canEdit) return false
     try {
       commit((currentData) => {
         const latest = currentData.matches.find((m) => m.id === match.id)
@@ -97,10 +100,13 @@ export default function ServiceCourt({
       })
       setDraft(null)
       notify('Service positions saved. The court follows your next rallies.')
+      return true
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Check the service positions.')
+      return false
     }
   }
+  useImperativeHandle(draftRef, () => ({ dirty: Boolean(draft), apply: save }))
   if (score.complete) return null
   const position = (side: Side, id: string) => {
     const near = current.nearSide === side

@@ -78,13 +78,14 @@ export function RallyProvider({ children }: { children: ReactNode }) {
       generation: (ref.current.generation ?? 0) + 1,
     }
     try {
-      journalState(stamped)
+      journalState(stamped, ref.current)
     } catch {
       setStorageError(
         'Recovery storage is full or unavailable. Wait for the local save indicator and download a backup before closing.',
       )
     }
     ref.current = stamped
+    setPersistStatus('saving')
     setSaved(stamped)
   }, [])
 
@@ -154,7 +155,12 @@ export function RallyProvider({ children }: { children: ReactNode }) {
     setPersistStatus('saving')
     saveQueue.current = saveQueue.current
       .catch(() => {})
-      .then(() => saveState(saved))
+      .then(() => {
+        // The synchronous journal already protects the newest state. Skip a
+        // queued snapshot superseded before its IndexedDB write has started.
+        if (saved.saveId !== ref.current.saveId) return
+        return saveState(saved)
+      })
       .then(() => {
         if (active) {
           setPersistStatus('saved')

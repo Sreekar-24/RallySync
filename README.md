@@ -1,8 +1,29 @@
 # RallySync
 
-**Less organizing. More badminton.** A responsive, installable courtside companion for your regular crew, hosted as a static app with no required backend or player accounts.
+**Less organizing. More badminton.** RallySync is a free badminton companion for friends and regular playing groups. Keep scores, plan fairer rotations, see who serves next, and track your progress—all from your phone, tablet, or computer, with no signup required.
+
+**[Open RallySync →](https://sreekar-24.github.io/RallySync/)** Try **Explore a demo** to look around without changing your saved history, or create a session with your own players. Install it to your home screen for easy courtside access. After the first online load, scoring works offline.
+
+- **Keep score your way:** singles or doubles, team totals, optional individual doubles credits, editable scores, plus/minus, and undo.
+- **Share the court:** plan a session by match count or available time, balance teams, rotate partners, and adjust when people join or take breaks.
+- **Know what comes next:** follow the current server and service positions, and check your next court, teammates, and estimated wait.
+- **See your progress:** explore rankings, partnerships, and session recaps; export PDF, CSV, or JSON reports and save recovery backups.
+- **Keep it comfortable:** focused scoring, pause/resume, interactive rules, light/dark/high-contrast themes, and optional screen-awake support.
 
 Interface previews: [desktop clubhouse](docs/screenshots/desktop.png) · [mobile scoring](docs/screenshots/mobile-scoring.png) · [focused scoring](docs/screenshots/focused-scoring.png) · [dark scoring](docs/screenshots/dark-scoring.png) · [interactive rules](docs/screenshots/rules.png) · [full schedule](docs/screenshots/schedule.png) · [partnership insights](docs/screenshots/partnerships.png).
+
+## Share with your crew
+
+Copy this for WhatsApp or social media:
+
+> 🏸 Meet RallySync — less organizing, more badminton!
+>
+> Keep singles and doubles scores, including optional individual doubles points. Plan balanced teams and fairer rotations, follow who serves next, and see your next match. Track rankings, partnerships, and session results, with PDF, CSV, and JSON exports.
+>
+> Free to use, no signup, and works on phones, tablets, and computers. Install it like an app and keep scoring offline after the first online load. Interactive rules and light/dark themes are included too.
+>
+> Try the demo and share it with your badminton crew:
+> https://sreekar-24.github.io/RallySync/
 
 ## What works
 
